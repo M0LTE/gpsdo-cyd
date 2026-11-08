@@ -6,7 +6,7 @@ It listens to two serial lines inside the GPSDO, the Arduino Nano's once-a-secon
 
 ![The four screens](docs/screens/overview.png)
 
-*Status: firmware builds and the screens are rendered from a real capture; not yet run on hardware.*
+*Status: running on a real CYD (two-USB board, ILI9341 panel) with the GPSDO report relayed over USB; the taps are not wired yet.*
 
 ## Why "reference OK" and not just "locked"
 
@@ -61,11 +61,12 @@ Uses [PlatformIO](https://platformio.org/).
 
 ```sh
 pio test -e native              # parser and logic tests, including a real 25-minute capture
-pio run -e cyd -t upload        # single-USB board (ILI9341)
-pio run -e cyd2usb -t upload    # two-USB board (ST7789)
+pio run -e cyd -t upload        # ILI9341 panel (most boards, ours included)
+pio run -e cyd2usb -t upload    # ST7789 panel: use this if the colours look inverted
 pio device monitor              # console: every received line, prefixed N> or G>
 tools/render.sh                 # render the screens on a PC into docs/screens/
 tools/replay.py /dev/ttyUSB0 captures/arduino-20261108.log   # drive a CYD from a capture
+tools/bridge.py NANO_PORT CYD_PORT  # relay the GPSDO's own USB report into the CYD, before wiring
 ```
 
 ## Wiring

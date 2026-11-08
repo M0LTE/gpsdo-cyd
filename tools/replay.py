@@ -17,7 +17,10 @@ def load(path, tag):
             if not l or l.startswith("#") or " " not in l:
                 continue
             ts, body = l.split(" ", 1)
-            t = datetime.datetime.fromisoformat(ts.rstrip("Z")).timestamp()
+            try:
+                t = datetime.datetime.fromisoformat(ts.rstrip("Z")).timestamp()
+            except ValueError:
+                continue  # continuation of a line split by a bare \r in the capture
             out.append((t, tag, body))
     return out
 
