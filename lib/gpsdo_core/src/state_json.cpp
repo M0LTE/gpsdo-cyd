@@ -65,6 +65,15 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
     s += ",\"firmware\":";
     s += quoted(n.revision());
   }
+  if (m.haveStatus(nowMs)) {
+    const StatusLine& st = m.status();
+    add(s, "lock_counter", "%u", (unsigned)st.lockCount);
+    add(s, "lock_target", "%u", (unsigned)st.lockTarget);
+    add(s, "lock_test_tic_ns", "%ld", (long)st.ticErrNs);
+    add(s, "lock_test_freq_ns", "%ld", (long)st.freqErrNs);
+    add(s, "missed_pps_total", "%u", (unsigned)st.missedPps);
+    add(s, "since_missed_pps_s", "%u", (unsigned)st.sinceMissedS);
+  }
   float ppb;
   if (m.frequencyPpb(1800, ppb)) add(s, "freq_error_ppb_30min", "%.4f", ppb);
   if (m.frequencyPpb(300, ppb)) add(s, "freq_error_ppb_5min", "%.4f", ppb);

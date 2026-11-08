@@ -31,8 +31,22 @@ struct ReportLine {
   float ambientC = 0;
 };
 
+// The machine-readable line our modified Nano firmware prints after each report (see nano/).
+struct StatusLine {
+  uint32_t time = 0;
+  uint32_t lockCount = 0, lockTarget = 0;  // locked once lockCount > lockTarget
+  int32_t ticErrNs = 0;                    // filtered TIC minus TIC_Offset, as the lock test uses (limit +-100)
+  int32_t freqErrNs = 0;                   // filtered phase change per second, as the lock test uses (limit +-20)
+  uint32_t missedPps = 0, sinceMissedS = 0;
+  char mode = '?';                         // W warm-up, R run, H hold
+  bool locked = false;
+  uint32_t dac = 0;
+  uint32_t restarts = 0;
+};
+
 enum class LineKind : uint8_t {
   Empty,
+  Status,        // "$GPSDO,1,..." from our modified firmware, checksum verified
   Data,          // a per-second report line, see ReportLine
   NoPps,         // " No PPS"
   Banner,        // "Arduino GPSDO with 1ns TIC ..." (startup)
@@ -44,6 +58,7 @@ enum class LineKind : uint8_t {
 struct ParsedLine {
   LineKind kind = LineKind::Empty;
   ReportLine data;          // valid when kind == Data
+  StatusLine status;        // valid when kind == Status
   std::string text;         // Revision/Data: revision string if present; Other: the trimmed line
   std::vector<std::string> tail;  // Data: the fields after the per-second values (rolling history replay)
 };

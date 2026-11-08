@@ -146,6 +146,36 @@ void test_real_capture() {
   TEST_ASSERT_TRUE(tr.locked());
 }
 
+void test_status_line() {
+  ParsedLine p = parseReportLine("$GPSDO,1,4,0,1500,96,48,0,4,W,0,30196,70*24\r");
+  TEST_ASSERT_EQUAL(LineKind::Status, p.kind);
+  TEST_ASSERT_EQUAL_UINT32(4, p.status.time);
+  TEST_ASSERT_EQUAL_UINT32(1500, p.status.lockTarget);
+  TEST_ASSERT_EQUAL_INT32(96, p.status.ticErrNs);
+  TEST_ASSERT_EQUAL_INT32(48, p.status.freqErrNs);
+  TEST_ASSERT_EQUAL('W', p.status.mode);
+  TEST_ASSERT_EQUAL_UINT32(70, p.status.restarts);
+  // Damaged: wrong checksum, or cut short.
+  TEST_ASSERT_EQUAL(LineKind::Other, parseReportLine("$GPSDO,1,4,0,1500,96,48,0,4,W,0,30196,70*25").kind);
+  TEST_ASSERT_EQUAL(LineKind::Other, parseReportLine("$GPSDO,1,4,0,1500,96,48,0,4,W").kind);
+}
+
+void test_first_boot_capture_with_status() {
+  std::ifstream in(CAPTURE_DIR "/arduino-cyd1-firstboot-20261108.log");
+  if (!in) TEST_IGNORE_MESSAGE("capture not present");
+  std::string line;
+  int status = 0, data = 0;
+  while (std::getline(in, line)) {
+    size_t sp = line.find(' ');
+    if (sp == std::string::npos) continue;
+    ParsedLine p = parseReportLine(line.substr(sp + 1));
+    if (p.kind == LineKind::Status) ++status;
+    if (p.kind == LineKind::Data) ++data;
+  }
+  TEST_ASSERT_EQUAL(data, status);
+  TEST_ASSERT_TRUE(status >= 15);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_data_line_ignores_tail_status);
@@ -158,5 +188,7 @@ int main() {
   RUN_TEST(test_tracker_no_pps_and_restart);
   RUN_TEST(test_dac_warning);
   RUN_TEST(test_real_capture);
+  RUN_TEST(test_status_line);
+  RUN_TEST(test_first_boot_capture_with_status);
   return UNITY_END();
 }

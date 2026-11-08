@@ -60,6 +60,8 @@ Without saved settings Wi-Fi stays off. Transmit power is capped at 2 dBm (`src/
  "gps_seen":true,"fix":"3D","sats_used":11,"sats_in_view":14,"hdop":0.78,"gps_age_s":0,"alarms":[]}
 ```
 
+With our modified Nano firmware (`nano/`) the state also carries `lock_counter`, `lock_target`, `lock_test_tic_ns`, `lock_test_freq_ns`, `missed_pps_total` and `since_missed_pps_s`.
+
 `reference_ok` is the one field to act on. `alarms` can hold `gpsdo_silent`, `no_pps`, `no_10mhz`, `unlocked`, `dac_near_limit`, `gps_silent`, `gps_no_fix`, `gps_few_sats` and `reference_suspect`.
 
 Home Assistant picks up a "GPSDO" device with Reference OK, Locked, State, TIC, TIC error, DAC, both temperatures, time locked, lock losses and satellites used.

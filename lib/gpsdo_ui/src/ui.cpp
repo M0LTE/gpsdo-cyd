@@ -230,8 +230,13 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
   switch (h) {
     case Headline::Locked:
       fmtDuration(dur, sizeof dur, n.secondsLocked());
-      std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s", dur, n.lockedSinceKnown() ? "" : "+",
-                    (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es");
+      if (m.missedPpsSinceStart())
+        std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s, %u missed pulse%s", dur, n.lockedSinceKnown() ? "" : "+",
+                      (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es", (unsigned)m.missedPpsSinceStart(),
+                      m.missedPpsSinceStart() == 1 ? "" : "s");
+      else
+        std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s", dur, n.lockedSinceKnown() ? "" : "+",
+                      (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es");
       if (m.gpsdoRestarts() || m.gpsRestarts()) {
         char ago[24];
         fmtDuration(ago, sizeof ago, (nowMs - m.lastRestartMs()) / 1000);
@@ -243,7 +248,10 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       break;
     case Headline::Unlocked: {
       uint32_t e = m.earliestLockS();
-      if (e) {
+      if (e && m.haveStatus(nowMs) && m.status().mode == 'R') {
+        fmtDuration(dur, sizeof dur, e);
+        std::snprintf(b, sizeof b, "%+.0f ns off; locks in %s if it stays in", m.ticErrorNs(), dur);
+      } else if (e) {
         fmtDuration(dur, sizeof dur, e);
         std::snprintf(b, sizeof b, "%+.0f ns off; earliest lock in %s", m.ticErrorNs(), dur);
       } else {
@@ -306,7 +314,8 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
   else std::snprintf(b, sizeof b, "%ld ns", (long)d.ns);
   setText(ticMain_, b);
   // The filtered phase is what the firmware locks on; 500 ns is its target.
-  if (d.hasDetail) std::snprintf(b, sizeof b, "average %+.0f ns off target", m.ticErrorNs());
+  if (m.haveStatus(nowMs)) std::snprintf(b, sizeof b, "lock test %+ld of +-100 ns", (long)m.status().ticErrNs);
+  else if (d.hasDetail) std::snprintf(b, sizeof b, "average %+.0f ns off target", m.ticErrorNs());
   else b[0] = 0;
   setText(ticSub_, b);
 

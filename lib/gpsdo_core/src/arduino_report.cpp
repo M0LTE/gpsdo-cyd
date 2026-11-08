@@ -70,6 +70,40 @@ ParsedLine parseReportLine(const std::string& raw) {
   std::string t = trim(raw);
   if (t.empty()) return p;
   if (t == "No PPS") { p.kind = LineKind::NoPps; return p; }
+  if (startsWith(t, "$GPSDO,")) {
+    // $GPSDO,1,time,lockCount,lockTarget,ticErr,freqErr,missed,sinceMissed,mode,locked,dac,restarts*CS
+    size_t star = t.rfind('*');
+    if (star == std::string::npos || star + 3 != t.size()) { p.kind = LineKind::Other; p.text = t; return p; }
+    unsigned cs = 0;
+    for (size_t i = 1; i < star; ++i) cs ^= (unsigned char)t[i];
+    unsigned want = (unsigned)std::strtoul(t.substr(star + 1).c_str(), nullptr, 16);
+    std::vector<std::string> f;
+    size_t a = 1;
+    for (;;) {
+      size_t c = t.find(',', a);
+      if (c == std::string::npos || c > star) { f.push_back(t.substr(a, star - a)); break; }
+      f.push_back(t.substr(a, c - a));
+      a = c + 1;
+    }
+    long v[13];
+    bool ok = cs == want && f.size() == 13 && f[1] == "1" && f[9].size() == 1;
+    for (int i = 2; ok && i < 13; ++i) if (i != 9 && !toLong(f[i], v[i])) ok = false;
+    if (!ok) { p.kind = LineKind::Other; p.text = t; return p; }
+    StatusLine& st = p.status;
+    st.time = (uint32_t)v[2];
+    st.lockCount = (uint32_t)v[3];
+    st.lockTarget = (uint32_t)v[4];
+    st.ticErrNs = (int32_t)v[5];
+    st.freqErrNs = (int32_t)v[6];
+    st.missedPps = (uint32_t)v[7];
+    st.sinceMissedS = (uint32_t)v[8];
+    st.mode = f[9][0];
+    st.locked = v[10] != 0;
+    st.dac = (uint32_t)v[11];
+    st.restarts = (uint32_t)v[12];
+    p.kind = LineKind::Status;
+    return p;
+  }
   if (startsWith(t, "Arduino GPSDO")) { p.kind = LineKind::Banner; p.text = t; return p; }
 
   std::vector<std::string> f = splitTabs(raw);

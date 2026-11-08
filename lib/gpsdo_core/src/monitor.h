@@ -92,6 +92,12 @@ public:
   // True only when the GPSDO is locked and the GPS confirms a good fix: the output can be trusted.
   bool referenceOk() const { return referenceOk_; }
 
+  // The latest status line from our modified Nano firmware, if one arrived in the last 3 s.
+  bool haveStatus(uint32_t nowMs) const { return haveStatus_ && nowMs - statusMs_ <= kSilentMs; }
+  const StatusLine& status() const { return status_; }
+  // PPS pulses the Nano has missed since the display started (from the status line).
+  uint32_t missedPpsSinceStart() const { return missedSinceStart_; }
+
   // Filtered TIC minus TIC_Offset, ns, as used by the firmware's lock test. Valid if hasDetail.
   float ticErrorNs() const;
   // While unlocked: the soonest the firmware could declare lock (5 x tc minus seconds since the
@@ -132,6 +138,10 @@ private:
   UtcClock clock_;
   int64_t lastPpsUs_ = 0;
   NanoHistory history_;
+  StatusLine status_;
+  bool haveStatus_ = false;
+  uint32_t statusMs_ = 0, missedSinceStart_ = 0, lastMissed_ = 0;
+  bool haveMissedBase_ = false;
   EventLog events_;
   bool eventsArmed_ = false;
   Headline prevHeadline_ = Headline::NoData;

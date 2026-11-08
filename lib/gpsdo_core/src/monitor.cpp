@@ -29,6 +29,23 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startU
     ++gpsdoRestarts_;
     lastRestartMs_ = nowMs;
   }
+  if (p.kind == LineKind::Status) {
+    const StatusLine& st = p.status;
+    if (haveMissedBase_ && st.missedPps > lastMissed_) {
+      uint32_t n = st.missedPps - lastMissed_;
+      missedSinceStart_ += n;
+      char b[48];
+      std::snprintf(b, sizeof b, "GPS pulse missed%s (%u since display start)", n > 1 ? " several times" : "",
+                    (unsigned)missedSinceStart_);
+      if (eventsArmed_) logEvent(nowMs, 1, b);
+    }
+    lastMissed_ = st.missedPps;
+    haveMissedBase_ = true;
+    status_ = st;
+    haveStatus_ = true;
+    statusMs_ = nowMs;
+    return;
+  }
   bool wasLocked = nano_.locked();
   nano_.onLine(p, nowMs);
   if (p.kind != LineKind::Data) { tick(nowMs); return; }
@@ -255,11 +272,14 @@ bool Monitor::top4Range(int& lo, int& hi) const {
 }
 
 float Monitor::ticErrorNs() const {
+  if (haveStatus(lastNowMs_)) return (float)status_.ticErrNs;
   const ReportLine& d = nano_.last();
   return d.filtX10 / 10.0f - GpsdoConstants::kTicOffsetNs;
 }
 
 uint32_t Monitor::earliestLockS() const {
+  if (nano_.haveData() && !nano_.locked() && haveStatus(lastNowMs_) && status_.mode == 'R')
+    return status_.lockCount > status_.lockTarget ? 0 : status_.lockTarget + 1 - status_.lockCount;
   if (!haveUnlockStart_ || !nano_.haveData() || nano_.locked()) return 0;
   const ReportLine& d = nano_.last();
   if (!d.hasDetail || d.tc == 0) return 0;
@@ -285,6 +305,8 @@ int Monitor::progressPermille() const {
     uint32_t t = d.time > (uint32_t)GpsdoConstants::kWarmUpS ? GpsdoConstants::kWarmUpS : d.time;
     return (int)(t * 1000 / GpsdoConstants::kWarmUpS);
   }
+  if (d.status == LockStatus::Unlocked && haveStatus(lastNowMs_) && status_.lockTarget)
+    return (int)(std::min<uint32_t>(status_.lockCount, status_.lockTarget) * 1000 / status_.lockTarget);
   if (d.status == LockStatus::Unlocked && d.hasDetail && d.tc) {
     uint32_t need = (uint32_t)d.tc * GpsdoConstants::kLockPpsFactor + 1;
     uint32_t left = earliestLockS();
