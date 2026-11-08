@@ -76,6 +76,18 @@ void test_no_pps_headline() {
   TEST_ASSERT_EQUAL(Headline::NoPps, m.headline());
 }
 
+void test_no_pps_after_boot_without_data() {
+  // GPSDO just powered: the Nano prints "No PPS" but no report lines yet (seen 2026-11-08).
+  Monitor m;
+  m.onNanoLine(" No PPS", 1000);
+  m.tick(1500);
+  TEST_ASSERT_EQUAL(Headline::NoPps, m.headline());
+  TEST_ASSERT_FALSE(m.alarms() & kAlarmNanoSilent);
+  TEST_ASSERT_FALSE(m.referenceOk());
+  m.tick(5000);
+  TEST_ASSERT_EQUAL(Headline::NoData, m.headline());
+}
+
 void test_earliest_lock_estimate() {
   Monitor m;
   m.onNanoLine(nanoLine(100, "Locked"), 0);
@@ -123,6 +135,7 @@ int main() {
   RUN_TEST(test_no_data_then_locked_without_gps);
   RUN_TEST(test_reference_ok_needs_gps_fix);
   RUN_TEST(test_no_pps_headline);
+  RUN_TEST(test_no_pps_after_boot_without_data);
   RUN_TEST(test_earliest_lock_estimate);
   RUN_TEST(test_trend_ring);
   RUN_TEST(test_state_json);

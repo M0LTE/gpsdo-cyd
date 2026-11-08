@@ -55,8 +55,8 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
     }
     uint32_t e = m.earliestLockS();
     if (e) add(s, "earliest_lock_s", "%u", (unsigned)e);
-    add(s, "gpsdo_age_s", "%u", (unsigned)(n.msSinceData(nowMs) / 1000));
   }
+  if (m.msSinceNanoLine(nowMs) != UINT32_MAX) add(s, "gpsdo_age_s", "%u", (unsigned)(m.msSinceNanoLine(nowMs) / 1000));
   if (!n.revision().empty()) {
     s += ",\"firmware\":";
     s += quoted(n.revision());

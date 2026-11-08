@@ -20,9 +20,10 @@ const char* headlineText(Headline h) {
 
 void Monitor::onNanoLine(const std::string& line, uint32_t nowMs) {
   ParsedLine p = parseReportLine(line);
+  if (p.kind != LineKind::Empty) { nanoHeard_ = true; lastNanoLineMs_ = nowMs; }
   bool wasLocked = nano_.locked();
   nano_.onLine(p, nowMs);
-  if (p.kind != LineKind::Data) return;
+  if (p.kind != LineKind::Data) { tick(nowMs); return; }
   const ReportLine& d = p.data;
   missing10MHz_ = d.missing10MHz;
   if (d.status != LockStatus::Locked) {
@@ -65,10 +66,12 @@ void Monitor::tick(uint32_t nowMs) {
   nmea_.expire(nowMs);
   uint16_t a = 0;
   bool nanoLive = nano_.msSinceData(nowMs) <= kSilentMs;
-  if (!nanoLive) a |= kAlarmNanoSilent;
+  // "No PPS" lines also prove the Nano is alive; only total silence is "no data".
+  bool nanoHeard = msSinceNanoLine(nowMs) <= kSilentMs;
+  if (!nanoHeard) a |= kAlarmNanoSilent;
   if (nano_.msSinceNoPps(nowMs) <= kSilentMs) a |= kAlarmNoPps;
   if (nanoLive && missing10MHz_) a |= kAlarmMissing10MHz;
-  if (nano_.haveData() && !nano_.locked()) a |= kAlarmUnlocked;
+  if ((nano_.haveData() && !nano_.locked()) || (a & kAlarmNoPps)) a |= kAlarmUnlocked;
   if (nano_.haveData() && ReportTracker::dacWarning(nano_.last().dac)) a |= kAlarmDacLimit;
 
   bool gpsLive = gpsSeen_ && nowMs - nmea_.lastGoodMs() <= kSilentMs;
@@ -88,10 +91,11 @@ void Monitor::tick(uint32_t nowMs) {
   referenceOk_ = locked && gpsGood && !(a & (kAlarmNoPps | kAlarmMissing10MHz));
   alarms_ = a;
 
-  if (!nanoLive) headline_ = Headline::NoData;
+  if (!nanoHeard) headline_ = Headline::NoData;
   else if (a & kAlarmNoPps) headline_ = Headline::NoPps;
   else if (a & kAlarmMissing10MHz) headline_ = Headline::Missing10MHz;
   else if (a & kAlarmRefSuspect) headline_ = Headline::RefSuspect;
+  else if (!nanoLive) headline_ = Headline::NoData;
   else if (locked) headline_ = Headline::Locked;
   else if (nano_.last().status == LockStatus::Hold) headline_ = Headline::Holdover;
   else if (nano_.last().status == LockStatus::WarmUp) headline_ = Headline::WarmUp;

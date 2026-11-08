@@ -55,6 +55,8 @@ public:
   void tick(uint32_t nowMs);
 
   const ReportTracker& nano() const { return nano_; }
+  // Milliseconds since any line at all from the Nano (data, "No PPS", text); UINT32_MAX if none.
+  uint32_t msSinceNanoLine(uint32_t nowMs) const { return nanoHeard_ ? nowMs - lastNanoLineMs_ : UINT32_MAX; }
   const NmeaParser& gps() const { return nmea_; }
   bool gpsEverSeen() const { return gpsSeen_; }
 
@@ -81,7 +83,8 @@ private:
   ReportTracker nano_;
   NmeaParser nmea_;
   bool gpsSeen_ = false;
-  uint32_t lastNanoText_ = 0;
+  bool nanoHeard_ = false;
+  uint32_t lastNanoLineMs_ = 0;
   bool missing10MHz_ = false;
   uint32_t unlockedSinceNanoTime_ = 0;
   bool haveUnlockStart_ = false;

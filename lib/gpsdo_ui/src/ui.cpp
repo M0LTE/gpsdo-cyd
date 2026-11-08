@@ -551,7 +551,7 @@ void Ui::updateTrends(const Monitor& m) {
 
 void Ui::updateFooter(int i, const Monitor& m, const UiExtras& x, uint32_t nowMs) {
   char b[40];
-  uint32_t nanoAge = m.nano().msSinceData(nowMs);
+  uint32_t nanoAge = m.msSinceNanoLine(nowMs);
   fmtAge(b, sizeof b, "GPSDO", nanoAge);
   setText(footerNano_[i], b);
   setColor(footerNano_[i], nanoAge <= Monitor::kSilentMs ? kDim : kRed);
