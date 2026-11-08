@@ -24,7 +24,7 @@ See [HARDWARE.md](HARDWARE.md) for everything we measured on our unit.
 
 Don't trust the labels alone; the resistance readings settle it.
 
-**GPS output:** the header pin with about **100 ohm** to the GPS board's **TX/TXD** pin. On our board that's J4 left (and J1 top). The pin with 100 ohm to the GPS **RXD** is its input; leave it alone. The pin with 0 ohm to GPS GND is ground.
+**GPS output:** the header pin with about **100 ohm** to the GPS board's **TX/TXD** pin. On our board that's J1 top (and J4 left). The pin with 100 ohm to the GPS **RXD** is its input; leave it alone. The pin with 0 ohm to GPS GND is ground.
 
 **Nano TX1:** pins 1 and 30 are at the end of the Nano furthest from its USB socket. TX1 is the corner pin of the row that carries D2 to D12; along that row from the far end the pins run TX1, RX0, RST, GND, D2... (the corner pin of the other row is VIN). Confirm by checking that the GND pin two places along reads 0 ohm to the GPS GND. Solder a thin wire to TX1 with the 10 k at that end.
 
