@@ -169,6 +169,8 @@ void Ui::buildStatus() {
   headline_ = text(O(banner_), &lv_font_montserrat_40, 0xFFFFFF, 12, 4, "NO DATA");
   subline_ = text(O(banner_), &lv_font_montserrat_14, 0xFFFFFF, 14, 50, "waiting for the GPSDO");
   lv_obj_set_style_text_opa(O(subline_), LV_OPA_80, 0);
+  lv_obj_set_width(O(subline_), kW - 12 - 28);
+  lv_label_set_long_mode(O(subline_), LV_LABEL_LONG_DOT);
   // Progress bar along the bottom of the banner: warm-up timer, or good seconds towards lock.
   progressTrack_ = box(O(banner_), 14, 69, kW - 12 - 28, 4, 0xFFFFFF, 2);
   lv_obj_set_style_bg_opa(O(progressTrack_), LV_OPA_30, 0);
@@ -199,6 +201,10 @@ void Ui::buildStatus() {
   lv_obj_t* tt = tile(s, 6 + w + gap, top + h + gap, w, h, "TEMPERATURE");
   tempMain_ = text(tt, &lv_font_montserrat_20, kText, 8, 18, "--");
   tempSub_ = text(tt, &lv_font_montserrat_12, kDim, 8, 44, "");
+  for (void* l : {gpsSub_, ticSub_, tempSub_, gpsMain_, ticMain_, tempMain_}) {
+    lv_obj_set_width(O(l), w - 12);
+    lv_label_set_long_mode(O(l), LV_LABEL_LONG_DOT);
+  }
 }
 
 void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
@@ -214,7 +220,7 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
   switch (h) {
     case Headline::Locked:
       fmtDuration(dur, sizeof dur, n.secondsLocked());
-      std::snprintf(b, sizeof b, "%s %s, %u lock loss%s", n.lockedSinceKnown() ? "for" : "for at least", dur,
+      std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s", dur, n.lockedSinceKnown() ? "" : "+",
                     (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es");
       if (m.gpsdoRestarts() || m.gpsRestarts()) {
         char ago[24];
@@ -223,15 +229,15 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       }
       break;
     case Headline::RefSuspect:
-      std::snprintf(b, sizeof b, "GPSDO says locked, but GPS has no good fix");
+      std::snprintf(b, sizeof b, "but the GPS has no good fix");
       break;
     case Headline::Unlocked: {
       uint32_t e = m.earliestLockS();
       if (e) {
         fmtDuration(dur, sizeof dur, e);
-        std::snprintf(b, sizeof b, "TIC %+.0f ns off, earliest lock %s", m.ticErrorNs(), dur);
+        std::snprintf(b, sizeof b, "TIC %+.0f ns, lock in %s at best", m.ticErrorNs(), dur);
       } else {
-        std::snprintf(b, sizeof b, "TIC %+.0f ns off target, limit 100", m.ticErrorNs());
+        std::snprintf(b, sizeof b, "TIC %+.0f ns off target (limit 100)", m.ticErrorNs());
       }
       break;
     }
@@ -240,14 +246,14 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
         fmtDuration(dur, sizeof dur, (nowMs - m.lastRestartMs()) / 1000);
         std::snprintf(b, sizeof b, "restarted %s ago, waiting for GPS", dur);
       } else {
-        std::snprintf(b, sizeof b, "no pulse from the GPS, holding last tune");
+        std::snprintf(b, sizeof b, "no GPS pulse, holding last tune");
       }
       break;
-    case Headline::Missing10MHz: std::snprintf(b, sizeof b, "the GPSDO sees no 10 MHz from the OCXO"); break;
+    case Headline::Missing10MHz: std::snprintf(b, sizeof b, "no 10 MHz from the oscillator"); break;
     case Headline::Holdover: std::snprintf(b, sizeof b, "hold mode set by command"); break;
     case Headline::WarmUp:
       fmtDuration(dur, sizeof dur, m.warmUpRemainingS());
-      std::snprintf(b, sizeof b, "start-up timer, %s to go, then locking", dur);
+      std::snprintf(b, sizeof b, "start-up timer, %s to go", dur);
       break;
     default:
       std::snprintf(b, sizeof b, n.haveData() ? "no report from the GPSDO" : "waiting for the GPSDO");
