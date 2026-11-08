@@ -88,6 +88,17 @@ void test_no_pps_after_boot_without_data() {
   TEST_ASSERT_EQUAL(Headline::NoData, m.headline());
 }
 
+void test_restart_counts() {
+  Monitor m;
+  m.onNanoLine("Arduino GPSDO with 1ns TIC by Lars Walenius\tRev. 3.4 paulv mods  ID:0\t", 1000);
+  m.onGpsLine("$GNTXT,01,01,02,u-blox AG - www.u-blox.com*4E", 1200);
+  m.onGpsLine("$GNTXT,01,01,02,HW UBX-M8030 00080000*60", 1200);
+  TEST_ASSERT_EQUAL_UINT32(1, m.gpsdoRestarts());
+  TEST_ASSERT_EQUAL_UINT32(1, m.gpsRestarts());
+  TEST_ASSERT_EQUAL_UINT32(1200, m.lastRestartMs());
+  TEST_ASSERT_TRUE(stateJson(m, 2000).find("\"gpsdo_restarts\":1") != std::string::npos);
+}
+
 void test_earliest_lock_estimate() {
   Monitor m;
   m.onNanoLine(nanoLine(100, "Locked"), 0);
@@ -136,6 +147,7 @@ int main() {
   RUN_TEST(test_reference_ok_needs_gps_fix);
   RUN_TEST(test_no_pps_headline);
   RUN_TEST(test_no_pps_after_boot_without_data);
+  RUN_TEST(test_restart_counts);
   RUN_TEST(test_earliest_lock_estimate);
   RUN_TEST(test_trend_ring);
   RUN_TEST(test_state_json);

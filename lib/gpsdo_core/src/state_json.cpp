@@ -42,6 +42,10 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
   add(s, "locked", "%s", tf(n.locked() && n.msSinceData(nowMs) <= Monitor::kSilentMs));
   add(s, "locked_s", "%u", (unsigned)n.secondsLocked());
   add(s, "lock_losses", "%u", (unsigned)n.lockLosses());
+  add(s, "gpsdo_restarts", "%u", (unsigned)m.gpsdoRestarts());
+  add(s, "gps_restarts", "%u", (unsigned)m.gpsRestarts());
+  if (m.gpsdoRestarts() || m.gpsRestarts())
+    add(s, "last_restart_age_s", "%u", (unsigned)((nowMs - m.lastRestartMs()) / 1000));
   if (n.haveData()) {
     if (!d.missing10MHz) add(s, "tic_ns", "%ld", (long)d.ns);
     add(s, "dac", "%u", (unsigned)d.dac);
@@ -112,6 +116,8 @@ const Entity kEntities[] = {
     {"sensor", "locked_s", "Time locked", "{{ value_json.locked_s }}", ",\"device_class\":\"duration\",\"unit_of_measurement\":\"s\""},
     {"sensor", "lock_losses", "Lock losses", "{{ value_json.lock_losses }}", ",\"state_class\":\"total_increasing\""},
     {"sensor", "sats_used", "Satellites used", "{{ value_json.sats_used }}", ",\"state_class\":\"measurement\""},
+    {"sensor", "gpsdo_restarts", "GPSDO restarts", "{{ value_json.gpsdo_restarts }}", ",\"state_class\":\"total_increasing\""},
+    {"sensor", "gps_restarts", "GPS restarts", "{{ value_json.gps_restarts }}", ",\"state_class\":\"total_increasing\""},
 };
 }  // namespace
 

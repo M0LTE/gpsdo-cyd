@@ -212,6 +212,11 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       fmtDuration(dur, sizeof dur, n.secondsLocked());
       std::snprintf(b, sizeof b, "%s %s, %u lock loss%s", n.lockedSinceKnown() ? "for" : "for at least", dur,
                     (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es");
+      if (m.gpsdoRestarts() || m.gpsRestarts()) {
+        char ago[24];
+        fmtDuration(ago, sizeof ago, (nowMs - m.lastRestartMs()) / 1000);
+        std::snprintf(b, sizeof b, "%s %s, restarted %s ago", n.lockedSinceKnown() ? "for" : "for at least", dur, ago);
+      }
       break;
     case Headline::RefSuspect:
       std::snprintf(b, sizeof b, "GPSDO says locked, but GPS has no good fix");
@@ -226,7 +231,14 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       }
       break;
     }
-    case Headline::NoPps: std::snprintf(b, sizeof b, "no pulse from the GPS, holding last tune"); break;
+    case Headline::NoPps:
+      if ((m.gpsdoRestarts() || m.gpsRestarts()) && nowMs - m.lastRestartMs() < 3600000UL) {
+        fmtDuration(dur, sizeof dur, (nowMs - m.lastRestartMs()) / 1000);
+        std::snprintf(b, sizeof b, "restarted %s ago, waiting for GPS", dur);
+      } else {
+        std::snprintf(b, sizeof b, "no pulse from the GPS, holding last tune");
+      }
+      break;
     case Headline::Missing10MHz: std::snprintf(b, sizeof b, "the GPSDO sees no 10 MHz from the OCXO"); break;
     case Headline::Holdover: std::snprintf(b, sizeof b, "hold mode set by command"); break;
     case Headline::WarmUp: std::snprintf(b, sizeof b, "OCXO warming up"); break;
@@ -253,6 +265,10 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
   }
 
   if (!n.haveData()) return;
+  // Grey the GPSDO figures when they are not fresh, so old numbers never pass for current ones.
+  bool fresh = n.msSinceData(nowMs) <= Monitor::kSilentMs;
+  for (void* l : {ticMain_, ticSub_, dacMain_, tempMain_, tempSub_})
+    lv_obj_set_style_text_opa(O(l), fresh ? LV_OPA_COVER : LV_OPA_40, 0);
   // TIC tile.
   if (d.missing10MHz) std::snprintf(b, sizeof b, "no 10 MHz");
   else std::snprintf(b, sizeof b, "%ld ns", (long)d.ns);

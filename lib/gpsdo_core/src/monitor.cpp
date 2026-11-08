@@ -21,6 +21,7 @@ const char* headlineText(Headline h) {
 void Monitor::onNanoLine(const std::string& line, uint32_t nowMs) {
   ParsedLine p = parseReportLine(line);
   if (p.kind != LineKind::Empty) { nanoHeard_ = true; lastNanoLineMs_ = nowMs; }
+  if (p.kind == LineKind::Banner) { ++gpsdoRestarts_; lastRestartMs_ = nowMs; }
   bool wasLocked = nano_.locked();
   nano_.onLine(p, nowMs);
   if (p.kind != LineKind::Data) { tick(nowMs); return; }
@@ -43,6 +44,12 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs) {
 
 void Monitor::onGpsLine(const std::string& line, uint32_t nowMs) {
   if (line.empty() || line[0] != '$') return;
+  // Checked before the checksum: after a power cut the boot text can arrive glued to a sentence
+  // that was cut off, so the whole line fails its checksum.
+  if (line.find("TXT,") != std::string::npos && line.find("u-blox AG") != std::string::npos) {
+    ++gpsRestarts_;
+    lastRestartMs_ = nowMs;
+  }
   if (nmea_.parse(line, nowMs)) gpsSeen_ = true;
 }
 

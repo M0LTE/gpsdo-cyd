@@ -60,6 +60,12 @@ public:
   const NmeaParser& gps() const { return nmea_; }
   bool gpsEverSeen() const { return gpsSeen_; }
 
+  // Start-ups seen while the display has been running: the Nano's banner, and the u-blox's
+  // "u-blox AG" boot text. Both at once usually means the GPSDO lost power.
+  uint32_t gpsdoRestarts() const { return gpsdoRestarts_; }
+  uint32_t gpsRestarts() const { return gpsRestarts_; }
+  uint32_t lastRestartMs() const { return lastRestartMs_; }  // valid if either count > 0
+
   uint16_t alarms() const { return alarms_; }
   Headline headline() const { return headline_; }
   // True only when the GPSDO is locked and the GPS confirms a good fix: the output can be trusted.
@@ -83,6 +89,7 @@ private:
   ReportTracker nano_;
   NmeaParser nmea_;
   bool gpsSeen_ = false;
+  uint32_t gpsdoRestarts_ = 0, gpsRestarts_ = 0, lastRestartMs_ = 0;
   bool nanoHeard_ = false;
   uint32_t lastNanoLineMs_ = 0;
   bool missing10MHz_ = false;
