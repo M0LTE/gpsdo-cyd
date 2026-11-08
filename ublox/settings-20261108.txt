@@ -1,0 +1,5 @@
+NMEA seen: True
+MON-VER: EXT CORE 3.01 (107900) / 00080000 / ROM BASE 3.01 (107888) | FWVER=SPG 3.01 | PROTVER=18.00 | MOD=NEO-M8N-0 | FIS=0xEF4015 (100111) | GPS;GLO;GAL;BDS | SBAS;IMES;QZSS
+CFG-TP5 tp0: period 0 us (locked 1000000), pulse length 0 us (locked 858993460), cable delay 25 ns, user delay 0 ns, flags 0x000000e7
+  flags: active, lockGnssFreq, lockedOtherSet, alignToTow, polarity gridUtcGnss=1
+raw: 00010000190000000000000040420f00000000003433333300000000e7000000
