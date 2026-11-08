@@ -1112,6 +1112,32 @@ void printDataToSerial()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
+// gpsdo-cyd addition: one machine-readable line per second, after the normal report, which is
+// left unchanged. NMEA-style with an XOR checksum so a reader can reject damaged lines:
+// $GPSDO,1,<time>,<lockPPScounter>,<lock target>,<filtered TIC - offset ns>,<filtered diff ns>,
+//        <missedPPS>,<timeSinceMissedPPS>,<mode W/R/H>,<PPSlocked 0/1>,<dacValueOut>,<restarts>*CS
+// The 1 is the format version. TIC is sampled in the capture interrupt before any printing, so
+// the extra ~75 ms of output does not affect the measurement.
+void printStatusLine()
+{
+  char b[100];
+  long ticErr = TIC_ValueFilteredForPPS_lock / 16 - TIC_Offset;
+  long freqErr = diff_ns_ForPPS_lock / 16;
+  char mode = (opMode == hold) ? 'H' : ((time > warmUpTime) ? 'R' : 'W');
+  int n = snprintf(b, sizeof b, "GPSDO,1,%lu,%lu,%lu,%ld,%ld,%u,%lu,%c,%d,%ld,%u",
+                   time, lockPPScounter, (unsigned long)(timeConst * lockPPSfactor), ticErr, freqErr,
+                   missedPPS, timeSinceMissedPPS, mode, PPSlocked ? 1 : 0, dacValueOut, restarts);
+  if (n < 0 || n >= (int)sizeof b) return;
+  byte cs = 0;
+  for (int i = 0; i < n; i++) cs ^= (byte)b[i];
+  Serial.print('$');
+  Serial.print(b);
+  Serial.print('*');
+  if (cs < 16) Serial.print('0');
+  Serial.println(cs, HEX);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 void printHeader1_ToSerial()
 {
 Serial.print(F("\n\r\n\rArduino GPSDO with 1ns TIC by Lars Walenius")); // paulv: added two new lines in front
@@ -1348,6 +1374,7 @@ void loop()
     calculation();
     getCommand();
     printDataToSerial();
+    printStatusLine(); // gpsdo-cyd: machine-readable status, see the function
     delay(100); // delay 100 milliseconds to give the PPS locked LED some time on if turned off in next step
     if ((dacValueOut < 3000 || dacValueOut > 62535) && opMode == run)
      { 
