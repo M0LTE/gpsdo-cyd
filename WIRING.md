@@ -5,11 +5,13 @@ The CYD only listens. It takes two signals and a ground from the GPSDO.
 **Header numbering differs between boards.** PaulV's published V2.1 schematic shows J1 as the GPS serial header ("Ser2USB") and J4 as the Nano's serial ("Raspberry Pi Serial Monitor"). On our board both J1 and J4 carry the GPS serial, J4 is brought out to the case as "GPS / TRG", and the Nano's TX isn't broken out at all. So identify the pins by resistance, as below, rather than by label.
 
 What we use on our board:
-- **GPS output:** J4's left pin (100 ohm to the GPS TXD pin), via the case connector.
+- **GPS output:** J1's top pin inside (100 ohm to the GPS TXD pin). J4, brought out to the front as "GPS / TRG", carries the same signals and is kept free for a USB-serial adapter.
 - **Nano report:** the Nano's own **TX1** pin, tapped directly.
-- **Ground:** J4's right pin (all grounds are common).
+- **Ground:** J1's bottom pin (all grounds are common).
 
-Leave the GPS RXD pin (J4 middle, J1 middle) unconnected: it leads into the GPS.
+Leave the GPS RXD pin (J1 middle, J4 middle) unconnected: it leads into the GPS.
+
+See [HARDWARE.md](HARDWARE.md) for everything we measured on our unit.
 
 ## You need
 
@@ -44,15 +46,15 @@ Don't use the CYD's P1 (it's the USB serial port) or CN1 (not needed).
                      |
                   [ 20k ]
                      |
- GND (J4 right) -----+------------------------> GND
+ GND (J1 bottom) ----+------------------------> GND
 
- GPS TXD (J4 left) -[ 1k ]--------------------> IO22
+ GPS TXD (J1 top) -[ 1k ]---------------------> IO22
 
                                                 IO21: not connected, taped off
 ```
 
 - The Nano runs at 5 V; the divider brings it to 3.3 V (5 x 20 / 30). The GPS is already 3.3 V; the 1 k just protects both ends.
-- Fit the resistors at the GPSDO end, under heatshrink: the 10 k at the Nano's TX1, the 1 k at the J4 socket.
+- Fit the resistors at the GPSDO end, under heatshrink: the 10 k at the Nano's TX1, the 1 k at the J1 socket.
 - One ground wire is enough.
 - Twist the three wires together, keep them away from the TIC area (C1, the HC4046 and the A0 input), and bring them out through a grommet.
 
