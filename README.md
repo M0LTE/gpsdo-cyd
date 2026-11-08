@@ -66,6 +66,10 @@ With our modified Nano firmware (`nano/`) the state also carries `lock_counter`,
 
 Home Assistant picks up a "GPSDO" device with Reference OK, Locked, State, TIC, TIC error, DAC, both temperatures, time locked, lock losses and satellites used.
 
+## Web page and names
+
+Once on Wi-Fi the display serves a read-only page at **http://gpsdo.local/** (mDNS; it also advertises its web page and NTP server). It also asks for the name `gpsdo` when it gets its address, so on networks whose router registers DHCP names it is reachable as plain `gpsdo` too (here `gpsdo.lan`). The page shows the verdict, the full event log, trends, the 18-day history, satellites and frequency error; the same data is JSON at `/api/state`, `/api/events`, `/api/trends`, `/api/history`, `/api/sats` and `/api/accuracy`.
+
 ## NTP server
 
 Once on Wi-Fi, the CYD answers NTP on UDP port 123 as a stratum 1 server with reference "GPS". The second comes from the GPS messages and the start of each second from the GPSDO: the Nano starts its report a fixed 5.8 ms after each PPS edge, and the CYD timestamps the first byte in the UART's receive interrupt. Requests are timestamped in their own task as they arrive, and Wi-Fi power saving is off, because sleeping between beacons delays requests but not replies, which would show up as an offset.
