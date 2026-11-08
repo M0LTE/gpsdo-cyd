@@ -218,7 +218,7 @@ void NmeaParser::parseGsv(const std::string& talker, const std::string* f, size_
     s->azimuth = toInt(q[2], v) ? (int16_t)v : -1;
     // With several signals per satellite (L1 and L5/E5) keep the best SNR seen this second.
     int snr = toInt(q[3], v) ? v : -1;
-    if (nowMs - s->seenMs > 900 || snr > s->snr) s->snr = (int8_t)snr;
+    if (ageMs(nowMs, s->seenMs) > 900 || snr > s->snr) s->snr = (int8_t)snr;
     s->seenMs = nowMs;
   }
 }
@@ -274,7 +274,7 @@ Satellite* NmeaParser::findOrAdd(Constellation sys, uint16_t prn, uint32_t nowMs
 void NmeaParser::expire(uint32_t nowMs) {
   for (auto& s : sats_) {
     uint32_t last = s.seenMs > s.usedMs ? s.seenMs : s.usedMs;
-    if (s.valid && nowMs - last > kExpireMs) s = Satellite{};
+    if (s.valid && ageMs(nowMs, last) > kExpireMs) s = Satellite{};
   }
 }
 

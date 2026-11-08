@@ -45,7 +45,7 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
   add(s, "gpsdo_restarts", "%u", (unsigned)m.gpsdoRestarts());
   add(s, "gps_restarts", "%u", (unsigned)m.gpsRestarts());
   if (m.gpsdoRestarts() || m.gpsRestarts())
-    add(s, "last_restart_age_s", "%u", (unsigned)((nowMs - m.lastRestartMs()) / 1000));
+    add(s, "last_restart_age_s", "%u", (unsigned)(ageMs(nowMs, m.lastRestartMs()) / 1000));
   if (n.haveData()) {
     if (!d.missing10MHz) add(s, "tic_ns", "%ld", (long)d.ns);
     add(s, "dac", "%u", (unsigned)d.dac);
@@ -90,7 +90,7 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
     add(s, "sats_used", "%u", f.haveGga ? (unsigned)f.satsUsed : (unsigned)g.satsUsed(nowMs));
     add(s, "sats_in_view", "%u", (unsigned)g.satsInView());
     add(s, "hdop", "%.2f", f.hdop);
-    add(s, "gps_age_s", "%u", (unsigned)((nowMs - g.lastGoodMs()) / 1000));
+    add(s, "gps_age_s", "%u", (unsigned)(ageMs(nowMs, g.lastGoodMs()) / 1000));
   }
   static const struct { uint16_t bit; const char* name; } kNames[] = {
       {kAlarmNanoSilent, "gpsdo_silent"}, {kAlarmNoPps, "no_pps"},         {kAlarmMissing10MHz, "no_10mhz"},

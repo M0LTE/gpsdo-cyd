@@ -77,7 +77,7 @@ public:
 
   const ReportTracker& nano() const { return nano_; }
   // Milliseconds since any line at all from the Nano (data, "No PPS", text); UINT32_MAX if none.
-  uint32_t msSinceNanoLine(uint32_t nowMs) const { return nanoHeard_ ? nowMs - lastNanoLineMs_ : UINT32_MAX; }
+  uint32_t msSinceNanoLine(uint32_t nowMs) const { return nanoHeard_ ? ageMs(nowMs, lastNanoLineMs_) : UINT32_MAX; }
   const NmeaParser& gps() const { return nmea_; }
   bool gpsEverSeen() const { return gpsSeen_; }
 
@@ -93,7 +93,7 @@ public:
   bool referenceOk() const { return referenceOk_; }
 
   // The latest status line from our modified Nano firmware, if one arrived in the last 3 s.
-  bool haveStatus(uint32_t nowMs) const { return haveStatus_ && nowMs - statusMs_ <= kSilentMs; }
+  bool haveStatus(uint32_t nowMs) const { return haveStatus_ && ageMs(nowMs, statusMs_) <= kSilentMs; }
   const StatusLine& status() const { return status_; }
   // PPS pulses the Nano has missed since the display started (from the status line).
   uint32_t missedPpsSinceStart() const { return missedSinceStart_; }

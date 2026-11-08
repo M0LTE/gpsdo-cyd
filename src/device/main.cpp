@@ -25,6 +25,7 @@
 #include "ntp_server.h"
 #include "portal.h"
 #include "settings.h"
+#include "web.h"
 #include "ui.h"
 
 using namespace gpsdo;
@@ -178,6 +179,7 @@ void pumpConsole() {
     if (!consoleLines.push((char)Serial.read())) continue;
     const std::string& l = consoleLines.line();
     if (l == "setup" && !portal.active()) { portal.begin(settings); continue; }
+    if (l == "clear events") { monitor.events() = EventLog(); Serial.println("# event log cleared"); continue; }
     if (l.size() < 2 || l[1] != ' ') continue;
     if (l[0] == 'N') monitor.onNanoLine(l.substr(2), millis());
     else if (l[0] == 'G') monitor.onGpsLine(l.substr(2), millis());
@@ -244,20 +246,23 @@ void setup() {
     portal.begin(settings);
   } else {
     net.begin(settings);
+    Web::begin(monitor);
   }
   Serial.printf("# ready, free heap %u\n", (unsigned)ESP.getFreeHeap());
 }
 
 void loop() {
-  uint32_t now = millis();
   pumpUart(nanoSerial, nanoLines, false);
   pumpUart(gpsSerial, gpsLines, true);
   pumpConsole();
+  // Read the clock after handling input, so nothing processed above is timestamped later than now.
+  uint32_t now = millis();
   if (portal.active()) {
     if (!portal.loop(now)) ui.show(Ui::kStatus);  // timed out: back to normal, Wi-Fi off
   } else {
     pollTouch(now);
     net.loop(monitor, now);
+    Web::loop();
   }
   Backlight::loop(now);
   Beeper::loop(now);

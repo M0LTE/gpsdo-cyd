@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GPSDO</title>
+<style>
+:root{--bg:#0b0f14;--panel:#161c24;--line:#2a3340;--text:#e6edf3;--dim:#8b98a5;--faint:#4a5563;
+--green:#2da44e;--amber:#d4a017;--red:#e5534b;--blue:#4c9aff;--grey:#3d4652;--lime:#8cc63f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:12px}
+.strip{position:sticky;top:0;z-index:2;padding:10px 16px;font-weight:600;font-size:18px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.strip small{font-weight:400;font-size:13px;opacity:.85}
+.ok{background:var(--green)}.bad{background:var(--red)}.unk{background:var(--amber)}.none{background:var(--grey)}
+.banner{border-radius:12px;padding:16px 20px;margin:12px 0}
+.banner h1{margin:0;font-size:40px;font-weight:500;letter-spacing:.5px}
+.banner p{margin:4px 0 0;opacity:.9}
+.bar{height:5px;background:rgba(255,255,255,.3);border-radius:3px;margin-top:10px;overflow:hidden}
+.bar div{height:100%;background:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+.tile,.card{background:var(--panel);border-radius:10px;padding:12px 14px}
+.tile h3,.card h2{margin:0 0 4px;font-size:11px;letter-spacing:.8px;color:var(--dim);font-weight:500;text-transform:uppercase}
+.card h2{font-size:13px;margin-bottom:8px}
+.big{font-size:26px}
+.sub{color:var(--dim);font-size:13px}
+section{margin-top:14px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--dim);font-weight:500;font-size:12px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+.when{white-space:nowrap;color:var(--dim)}
+svg{width:100%;display:block}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px}
+.chart-title{display:flex;justify-content:space-between;font-size:12px;color:var(--dim)}
+.muted{color:var(--faint)}
+a{color:var(--blue)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px}
+.kv td:first-child{color:var(--dim);width:40%}
+footer{color:var(--faint);font-size:12px;margin:20px 0}
+</style>
+</head>
+<body>
+<div id="strip" class="strip none"><span id="verdict">Connecting...</span><small id="ages"></small></div>
+<main>
+<div id="banner" class="banner none"><h1 id="headline">...</h1><p id="subline"></p><div class="bar" id="bar" hidden><div id="barfill"></div></div></div>
+
+<div class="grid">
+ <div class="tile"><h3>GPS</h3><div class="big" id="gpsMain">-</div><div class="sub" id="gpsSub"></div></div>
+ <div class="tile"><h3>Phase vs GPS pulse</h3><div class="big" id="ticMain">-</div><div class="sub" id="ticSub"></div></div>
+ <div class="tile"><h3>Oscillator tuning</h3><div class="big" id="dacMain">-</div><div class="sub" id="dacSub"></div></div>
+ <div class="tile"><h3>Oscillator temperature</h3><div class="big" id="tempMain">-</div><div class="sub" id="tempSub"></div></div>
+ <div class="tile"><h3>10 MHz accuracy</h3><div class="big" id="accMain">-</div><div class="sub" id="accSub"></div></div>
+</div>
+
+<section class="card"><h2>Events (newest first, UTC)</h2><table id="events"><tbody></tbody></table></section>
+
+<section><div class="charts" id="trendCharts"></div><div class="sub" style="margin-top:4px">Last 30 minutes as 12-second averages. Strip: locked (green), partly (amber), not locked (red).</div></section>
+
+<section><div class="charts" id="histCharts"></div><div class="sub" style="margin-top:4px" id="histNote"></div></section>
+
+<section class="two">
+ <div class="card"><h2>Sky</h2><svg id="sky" viewBox="-110 -110 220 220"></svg></div>
+ <div class="card"><h2>Satellites</h2><table id="sats"><thead><tr><th>Satellite</th><th>Signal dB-Hz</th><th>Elevation</th><th>Azimuth</th><th>In fix</th></tr></thead><tbody></tbody></table><div class="sub" id="antenna"></div></div>
+</section>
+
+<section class="two">
+ <div class="card"><h2>Frequency error</h2><table class="kv" id="acc"><tbody></tbody></table></div>
+ <div class="card"><h2>GPSDO details</h2><table class="kv" id="details"><tbody></tbody></table></div>
+</section>
+
+<footer>Read-only. JSON: <a href="/api/state">state</a>, <a href="/api/events">events</a>, <a href="/api/trends">trends</a>, <a href="/api/history">history</a>, <a href="/api/sats">satellites</a>, <a href="/api/accuracy">accuracy</a>. Settings: hold the screen while the display starts up. <a href="https://github.com/M0LTE/gpsdo-cyd">Source</a>.</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const C={green:'#2da44e',amber:'#d4a017',red:'#e5534b',blue:'#4c9aff',grey:'#3d4652',lime:'#8cc63f',line:'#2a3340'};
+const get=u=>fetch(u,{cache:'no-store'}).then(r=>r.json());
+const dur=s=>{s=Math.max(0,Math.round(s));const d=Math.floor(s/86400),h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60;
+ return d?`${d}d ${h}h`:h?`${h}h ${String(m).padStart(2,'0')}m`:`${m}m ${String(s%60).padStart(2,'0')}s`};
+const snrCol=v=>v<0?C.grey:v<20?C.red:v<30?C.amber:v<40?C.lime:C.green;
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function when(t){if(!t)return'time unknown';const d=new Date(t*1000);
+ return `${d.getUTCDate()} ${mon[d.getUTCMonth()]} ${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')}`}
+function kv(id,rows){$(id).tBodies[0].innerHTML=rows.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}
+
+// A line chart in SVG. series: array of numbers or null. strip: optional array of 0/1/2 lock states.
+function chart(el,title,series,opts={}){
+ const W=600,H=110,pad=4,n=series.length;
+ const vals=series.filter(v=>v!=null);
+ let lo=Math.min(...vals),hi=Math.max(...vals);
+ if(!vals.length){lo=0;hi=1}
+ if(hi-lo<(opts.minSpan||4)){const c=(hi+lo)/2;lo=c-(opts.minSpan||4)/2;hi=c+(opts.minSpan||4)/2}
+ const m=(hi-lo)*.1;lo-=m;hi+=m;
+ const x=i=>pad+(W-2*pad)*(n<2?1:i/(n-1)),y=v=>H-pad-(H-2*pad)*(v-lo)/(hi-lo);
+ let d='',pen=false;
+ series.forEach((v,i)=>{if(v==null){pen=false;return}d+=(pen?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1);pen=true});
+ let grid='';for(let k=1;k<4;k++)grid+=`<line x1="0" x2="${W}" y1="${H*k/4}" y2="${H*k/4}" stroke="${C.line}"/>`;
+ let strip='';
+ if(opts.strip){const w=(W-2*pad)/opts.strip.length;
+  opts.strip.forEach((s,i)=>{if(s==null)return;strip+=`<rect x="${(pad+i*w).toFixed(1)}" y="${H+4}" width="${(w+.6).toFixed(1)}" height="7" fill="${s==2?C.green:s==1?C.amber:C.red}"/>`})}
+ const fmt=opts.fmt||(v=>Math.round(v));
+ const last=vals.length?fmt(vals[vals.length-1]):'-';
+ const range=vals.length?`now ${last}, range ${fmt(Math.min(...vals))} to ${fmt(Math.max(...vals))}`:'collecting...';
+ el.innerHTML=`<div class="card"><div class="chart-title"><span>${esc(title)}</span><span>${esc(range)}</span></div>
+ <svg viewBox="0 0 ${W} ${H+(opts.strip?14:0)}" preserveAspectRatio="none" style="height:${opts.strip?150:130}px">${grid}<path d="${d}" fill="none" stroke="${opts.color}" stroke-width="2" vector-effect="non-scaling-stroke"/>${strip}</svg></div>`;
+}
+function chartSlot(parent,i){let c=parent.children[i];if(!c){c=document.createElement('div');parent.appendChild(c)}return c}
+
+async function state(){
+ const s=await get('/api/state');
+ const verdict=s.reference_ok?['ok','10 MHz OK']:(s.locked&&!s.gps_seen)?['unk','10 MHz UNCHECKED']:['bad','10 MHz UNRELIABLE'];
+ $('strip').className='strip '+verdict[0];$('verdict').textContent=verdict[1];
+ $('ages').textContent=`GPSDO ${s.gpsdo_age_s??'-'}s, GPS ${s.gps_age_s??'-'}s`;
+ const col={'LOCKED':'ok','NO DATA':'none','UNLOCKED':'unk','WARM UP':'unk','HOLD':'unk'}[s.state]||'bad';
+ $('banner').className='banner '+col;$('headline').textContent=s.state;document.title=`GPSDO ${s.state}`;
+ let sub='';
+ if(s.state=='LOCKED')sub=`for ${dur(s.locked_s)}, ${s.lock_losses} lock loss${s.lock_losses==1?'':'es'}`;
+ else if(s.state=='GPS LOST')sub='GPSDO says locked, but the GPS has no good fix';
+ else if(s.state=='NO PPS')sub='no pulse from the GPS, holding last tune';
+ else if(s.lock_target)sub=`lock counter ${s.lock_counter} of ${s.lock_target+1} good seconds`+(s.earliest_lock_s?`, locks in ${dur(s.earliest_lock_s)} if it stays in`:'');
+ else if(s.earliest_lock_s)sub=`earliest lock in ${dur(s.earliest_lock_s)}`;
+ $('subline').textContent=sub;
+ const prog=s.lock_target&&s.state!='LOCKED'?Math.min(1,s.lock_counter/(s.lock_target+1)):null;
+ $('bar').hidden=prog==null;if(prog!=null)$('barfill').style.width=(prog*100).toFixed(1)+'%';
+ $('gpsMain').textContent=s.gps_seen?(s.fix=='none'?'no fix':`${s.sats_used} satellites`):'no GPS data';
+ $('gpsSub').textContent=s.gps_seen?`${s.fix} fix, ${s.sats_in_view} in view, HDOP ${s.hdop}`+(s.antenna?`, antenna ${s.antenna}`:''):'';
+ $('ticMain').textContent=s.tic_ns!=null?`${s.tic_ns} ns`:'-';
+ $('ticSub').textContent=s.lock_test_tic_ns!=null?`lock test ${s.lock_test_tic_ns>0?'+':''}${s.lock_test_tic_ns} of ±100 ns`:'';
+ $('dacMain').textContent=s.dac??'-';
+ $('dacSub').textContent=s.dac!=null?(s.dac_near_limit?'NEAR LIMIT':`${Math.round(s.dac*100/65535)}% of range`):'';
+ $('tempMain').textContent=s.ocxo_c!=null?`${s.ocxo_c} °C`:'-';
+ $('tempSub').textContent=s.ambient_c!=null?`ambient ${s.ambient_c} °C`:'';
+ const p=s.freq_error_ppb_30min??s.freq_error_ppb_5min;
+ $('accMain').textContent=p!=null?`${p>0?'+':''}${p.toFixed(3)} ppb`:'-';
+ $('accSub').textContent=p!=null?`${s.freq_error_ppb_30min!=null?'30':'5'}-minute average, ${(Math.abs(p)*14).toFixed(2)} mHz at 14 MHz`:'needs locked running';
+ kv('details',[['Firmware',s.firmware||'-'],['Time constant',s.tc_s?`${s.tc_s} s`:'-'],['Lock counter',s.lock_target?`${s.lock_counter} / ${s.lock_target}`:'-'],
+  ['Missed PPS (total)',s.missed_pps_total??'-'],['Last missed PPS',s.since_missed_pps_s!=null?`${dur(s.since_missed_pps_s)} ago`:'-'],
+  ['Restarts seen',`GPSDO ${s.gpsdo_restarts}, GPS ${s.gps_restarts}`],['Alarms',s.alarms.length?s.alarms.join(', '):'none']]);
+}
+async function events(){
+ const ev=await get('/api/events');
+ $('events').tBodies[0].innerHTML=ev.length?ev.map(e=>`<tr><td class="when"><span class="dot" style="background:${[C.green,C.amber,C.red][e.level]}"></span>${when(e.t)}</td><td>${esc(e.text)}</td></tr>`).join(''):'<tr><td class="muted">nothing yet</td></tr>';
+}
+async function trends(){
+ const t=await get('/api/trends');const pts=t.points;
+ const pad=a=>Array(Math.max(0,150-a.length)).fill(null).concat(a);
+ const col=k=>pad(pts.map(p=>p?p[k]:null)),strip=pad(pts.map(p=>p?p[3]:null));
+ const box=$('trendCharts');
+ chart(chartSlot(box,0),'Phase vs GPS pulse, ns',col(0),{color:C.blue,strip});
+ chart(chartSlot(box,1),'Phase change per second, ns',col(1),{color:C.amber});
+ chart(chartSlot(box,2),'Oscillator tuning (DAC)',col(2),{color:C.green});
+}
+async function history(){
+ const h=await get('/api/history');
+ const pad=(a,n)=>Array(Math.max(0,n-a.length)).fill(null).concat(a);
+ const three=pad(h.three_hour,144),five=pad(h.five_min,144);
+ const box=$('histCharts');
+ const strip=three.map(e=>e?(e[3]=='L'?2:e[3]=='U'?0:1):null);
+ chart(chartSlot(box,0),'Oscillator tuning (DAC), 18 days of 3-hour averages',three.map(e=>e&&e[1]),{color:C.green,strip});
+ chart(chartSlot(box,1),'Oscillator temperature °C, 18 days',three.map(e=>e&&e[2]),{color:C.amber,minSpan:.5,fmt:v=>v.toFixed(1)});
+ chart(chartSlot(box,2),'Phase vs target ns, 12 hours of 5-minute averages',five.map(e=>e&&e[0]),{color:C.blue});
+ $('histNote').textContent=`From the GPSDO's own memory (${h.seen_three_hour}/144 three-hour and ${h.seen_five_min}/144 five-minute entries received). Strip: locked for the whole 3 hours (green), not locked (red), restart or hold (amber).`;
+}
+async function sats(){
+ const s=await get('/api/sats');
+ s.sort((a,b)=>b.snr-a.snr);
+ $('sats').tBodies[0].innerHTML=s.map(x=>`<tr><td><span class="dot" style="background:${snrCol(x.snr)}"></span>${x.id}</td><td>${x.snr<0?'-':x.snr}</td><td>${x.el}°</td><td>${x.az}°</td><td>${x.used?'yes':''}</td></tr>`).join('');
+ let g='';for(const r of[100,66.7,33.3])g+=`<circle r="${r}" fill="none" stroke="${C.line}"/>`;
+ g+=`<line x1="0" y1="-100" x2="0" y2="100" stroke="${C.line}"/><line x1="-100" y1="0" x2="100" y2="0" stroke="${C.line}"/>`;
+ for(const [t,x,y] of [['N',0,-102],['E',104,4],['S',0,110],['W',-110,4]])g+=`<text x="${x}" y="${y}" fill="#8b98a5" font-size="9" text-anchor="middle">${t}</text>`;
+ for(const x of s){const r=100*(90-x.el)/90,a=x.az*Math.PI/180,px=r*Math.sin(a),py=-r*Math.cos(a),c=snrCol(x.snr);
+  g+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4.5" fill="${x.used?c:'none'}" stroke="${c}" stroke-width="1.5"/><text x="${(px+6).toFixed(1)}" y="${(py+3).toFixed(1)}" fill="#e6edf3" font-size="7">${x.id}</text>`}
+ $('sky').innerHTML=g;
+}
+async function accuracy(){
+ const a=await get('/api/accuracy');
+ const f=v=>v==null?'not enough locked data yet':`${v>0?'+':''}${v.toFixed(4)} ppb`;
+ const rows=[['Over 1 minute',f(a['60'])],['Over 5 minutes',f(a['300'])],['Over 30 minutes',f(a['1800'])]];
+ const p=a['1800'];
+ if(p!=null)for(const mhz of[3.5,7,10,14,28,50,144])rows.push([`At ${mhz} MHz`,`${(Math.abs(p)*mhz).toFixed(2)} mHz`]);
+ kv('acc',rows);
+}
+const every=(fn,ms)=>{const run=()=>fn().catch(()=>{$('strip').className='strip none';$('verdict').textContent='Display not reachable'});run();setInterval(run,ms)};
+every(state,2000);every(events,5000);every(trends,12000);every(history,60000);every(sats,5000);every(accuracy,12000);
+</script>
+</body>
+</html>

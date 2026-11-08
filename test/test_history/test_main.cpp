@@ -5,6 +5,7 @@
 #include <string>
 
 #include "monitor.h"
+#include "web_json.h"
 
 using namespace gpsdo;
 
@@ -67,15 +68,15 @@ void test_events_and_antenna() {
   char b[120];
   for (uint32_t t = 0; t < 5; ++t) {
     std::snprintf(b, sizeof b, "%u\t1\t30000\t44.0\tLocked\t0\t5000\t300\t150\t25191\t34.1\t", t);
-    m.onNanoLine(b, t * 1000);
+    m.onNanoLine(b, 60000 + t * 1000);
   }
   TEST_ASSERT_EQUAL_INT(1, m.events().count());  // "Display started: LOCKED"
-  m.onNanoLine("5\t1\t30000\t44.0\t****\t0\t5000\t300\t150\t25191\t34.1\t", 5000);
+  m.onNanoLine("5\t1\t30000\t44.0\t****\t0\t5000\t300\t150\t25191\t34.1\t", 65000);
   TEST_ASSERT_EQUAL_INT(2, m.events().count());
   TEST_ASSERT_EQUAL_STRING("GPSDO not locked", m.events().newest(0).text);
   TEST_ASSERT_EQUAL_UINT8(2, m.events().newest(0).level);
-  m.onGpsLine("$GNTXT,01,01,02,ANTSTATUS=SHORT*73", 5100);
-  m.tick(5200);
+  m.onGpsLine("$GNTXT,01,01,02,ANTSTATUS=SHORT*73", 65100);
+  m.tick(65200);
   TEST_ASSERT_EQUAL_STRING("SHORT", m.gps().antennaStatus().c_str());
   TEST_ASSERT_EQUAL_STRING("GPS antenna: SHORT", m.events().newest(0).text);
   // Saving and restoring the log keeps it intact.
@@ -87,10 +88,40 @@ void test_events_and_antenna() {
   TEST_ASSERT_EQUAL_STRING(m.events().newest(1).text, copy.newest(1).text);
 }
 
+void test_web_json() {
+  Monitor m = replayCapture();
+  std::string h = historyJson(m), t = trendsJson(m), e = eventsJson(m), a = accuracyJson(m);
+  TEST_ASSERT_TRUE(h.find("\"three_hour\":[[") != std::string::npos);
+  TEST_ASSERT_TRUE(t.find("\"points\":[[") != std::string::npos);
+  TEST_ASSERT_EQUAL('[', e[0]);
+  TEST_ASSERT_TRUE(a.find("\"1800\":") != std::string::npos);
+  // Every document must be valid JSON; checked by brackets balancing here, and by the page in practice.
+  for (const std::string* d : {&h, &t, &e, &a}) {
+    int depth = 0;
+    for (char c : *d) depth += (c == '[' || c == '{') - (c == ']' || c == '}');
+    TEST_ASSERT_EQUAL(0, depth);
+  }
+  std::printf("history json %u bytes, trends json %u bytes\n", (unsigned)h.size(), (unsigned)t.size());
+}
+
+void test_tick_before_latest_gps_is_not_silence() {
+  // The bug behind the "GPS fix lost / good" flapping: a once-a-second check with a clock reading
+  // taken before GPS lines processed in the same pass must not see the GPS as 49 days silent.
+  Monitor m;
+  m.onNanoLine("100\t1\t30000\t44.0\tLocked\t0\t5000\t300\t150\t25191\t34.1\t", 60000);
+  m.onGpsLine("$GNGGA,132000.00,5200.00000,N,00100.00000,W,1,09,0.95,52.3,M,47.0,M,,*64", 61050);
+  m.onGpsLine("$GNGSA,A,3,05,13,15,18,,,,,,,,,1.60,0.95,1.29,1*0A", 61060);
+  m.tick(61000);  // earlier than the GPS lines above
+  TEST_ASSERT_FALSE(m.alarms() & kAlarmGpsSilent);
+  TEST_ASSERT_FALSE(m.alarms() & kAlarmGpsNoFix);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_history_from_real_capture);
   RUN_TEST(test_frequency_estimate);
   RUN_TEST(test_events_and_antenna);
+  RUN_TEST(test_web_json);
+  RUN_TEST(test_tick_before_latest_gps_is_not_silence);
   return UNITY_END();
 }

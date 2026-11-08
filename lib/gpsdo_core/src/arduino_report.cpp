@@ -1,5 +1,7 @@
 #include "arduino_report.h"
 
+#include "age.h"
+
 #include <climits>
 #include <cstdlib>
 #include <vector>
@@ -203,11 +205,11 @@ void ReportTracker::onLine(const ParsedLine& p, uint32_t nowMs) {
 }
 
 uint32_t ReportTracker::msSinceData(uint32_t nowMs) const {
-  return haveData_ ? nowMs - lastDataMs_ : UINT32_MAX;
+  return haveData_ ? ageMs(nowMs, lastDataMs_) : UINT32_MAX;
 }
 
 uint32_t ReportTracker::msSinceNoPps(uint32_t nowMs) const {
-  return noPpsSinceData_ ? nowMs - lastNoPpsMs_ : UINT32_MAX;
+  return noPpsSinceData_ ? ageMs(nowMs, lastNoPpsMs_) : UINT32_MAX;
 }
 
 uint32_t ReportTracker::secondsLocked() const {

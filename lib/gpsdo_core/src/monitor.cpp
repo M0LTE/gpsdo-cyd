@@ -25,7 +25,7 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startU
   if (p.kind != LineKind::Empty) { nanoHeard_ = true; lastNanoLineMs_ = nowMs; }
   // The f1 help text reprints the start-up banner straight after its first line; that's no restart.
   if (p.kind == LineKind::Other && p.text.rfind("Info and help", 0) == 0) { sawHelp_ = true; lastHelpMs_ = nowMs; }
-  if (p.kind == LineKind::Banner && !(sawHelp_ && nowMs - lastHelpMs_ < 2000)) {
+  if (p.kind == LineKind::Banner && !(sawHelp_ && ageMs(nowMs, lastHelpMs_) < 2000)) {
     ++gpsdoRestarts_;
     lastRestartMs_ = nowMs;
   }
@@ -135,7 +135,7 @@ void Monitor::tick(uint32_t nowMs) {
   if ((nano_.haveData() && !nano_.locked()) || (a & kAlarmNoPps)) a |= kAlarmUnlocked;
   if (nano_.haveData() && ReportTracker::dacWarning(nano_.last().dac)) a |= kAlarmDacLimit;
 
-  bool gpsLive = gpsSeen_ && nowMs - nmea_.lastGoodMs() <= kSilentMs;
+  bool gpsLive = gpsSeen_ && ageMs(nowMs, nmea_.lastGoodMs()) <= kSilentMs;
   const Fix& f = nmea_.fix();
   if (!gpsLive) {
     a |= kAlarmGpsSilent;
@@ -175,7 +175,7 @@ void Monitor::tick(uint32_t nowMs) {
     for (int b : best) if (b >= 0) { sum += b; ++n; }
     top4_ = n == 4 ? sum / 4 : -1;
     if (top4_ >= 0) { top4Acc_ += top4_; ++top4AccN_; }
-    if (nowMs - top4LastMs_ >= 600000UL) {
+    if (ageMs(nowMs, top4LastMs_) >= 600000UL) {
       top4LastMs_ = nowMs;
       if (top4AccN_) {
         top4Hist_[top4Head_] = (int8_t)(top4Acc_ / top4AccN_);
@@ -217,6 +217,9 @@ void Monitor::detectEvents(uint32_t nowMs) {
   if (!eventsArmed_) {
     // Take the first real picture as the baseline rather than logging "changes" from start-up.
     if (headline_ == Headline::NoData) return;
+    int64_t u;
+    bool pps;
+    if (!clock_.now((int64_t)nowMs * 1000, u, pps) && nowMs < 60000) return;  // wait for UTC, up to a minute
     eventsArmed_ = true;
     prevHeadline_ = headline_;
     prevGpsGood_ = gpsGood;

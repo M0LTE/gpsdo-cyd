@@ -2,3 +2,4 @@
 .pio/
 ref/
 nano/.pio/
+src/device/web_index_gen.h

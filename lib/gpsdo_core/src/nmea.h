@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <string>
 
+#include "age.h"
+
 namespace gpsdo {
 
 enum class Constellation : uint8_t { Unknown, Gps, Sbas, Glonass, Galileo, BeiDou, Qzss };
@@ -62,7 +64,7 @@ public:
   void expire(uint32_t nowMs);
   const std::array<Satellite, kMaxSats>& satellites() const { return sats_; }
   bool isUsed(const Satellite& s, uint32_t nowMs) const {
-    return s.everUsed && nowMs - s.usedMs <= kUsedWindowMs;
+    return s.everUsed && ageMs(nowMs, s.usedMs) <= kUsedWindowMs;
   }
   size_t satsInView() const;
   size_t satsUsed(uint32_t nowMs) const;
