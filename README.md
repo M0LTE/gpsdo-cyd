@@ -71,7 +71,7 @@ tools/bridge.py NANO_PORT CYD_PORT  # relay the GPSDO's own USB report into the 
 
 ## Wiring
 
-See [WIRING.md](WIRING.md). Both taps go into connector P3: the Nano's TX through a 10k/20k divider to IO35, the u-blox TX through 1k to IO22, plus ground. The CYD has its own USB power.
+See [WIRING.md](WIRING.md). It plugs onto two headers already on the GPSDO board: J4 (the Nano's report, through a 10k/20k divider to IO35) and J1 (the GPS output, through 1k to IO22), plus ground, all into the CYD's P3. No soldering on the GPSDO. The CYD has its own USB power.
 
 ## Layout
 
