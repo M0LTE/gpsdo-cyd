@@ -29,7 +29,7 @@ void test_checksum() {
 
 void test_gga() {
   NmeaParser p;
-  TEST_ASSERT_TRUE(p.parse("$GNGGA,132000.00,5126.00000,N,00058.00000,W,1,09,0.95,52.3,M,47.0,M,,*6F\r\n", 5));
+  TEST_ASSERT_TRUE(p.parse("$GNGGA,132000.00,5200.00000,N,00100.00000,W,1,09,0.95,52.3,M,47.0,M,,*64\r\n", 5));
   TEST_ASSERT_EQUAL_UINT8(1, p.fix().quality);
   TEST_ASSERT_EQUAL_UINT8(9, p.fix().satsUsed);
   TEST_ASSERT_EQUAL_FLOAT(0.95f, p.fix().hdop);
@@ -93,7 +93,7 @@ void test_expiry() {
 
 void test_rmc_zda_txt() {
   NmeaParser p;
-  TEST_ASSERT_TRUE(p.parse("$GNRMC,132000.00,A,5126.00000,N,00058.00000,W,0.01,,081126,,,A,V*36", 0));
+  TEST_ASSERT_TRUE(p.parse("$GNRMC,132000.00,A,5200.00000,N,00100.00000,W,0.01,,081126,,,A,V*3D", 0));
   TEST_ASSERT_TRUE(p.utc().valid);
   TEST_ASSERT_EQUAL_UINT16(2026, p.utc().year);
   TEST_ASSERT_EQUAL_UINT8(11, p.utc().month);
