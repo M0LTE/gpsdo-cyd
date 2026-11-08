@@ -172,6 +172,18 @@ int main(int argc, char** argv) {
   x.wifiEnabled = true;
   x.wifiConnected = true;
   x.mqttConnected = true;
+  // Example network details (documentation addresses, not real ones).
+  x.ssid = "example-wifi";
+  x.ip = "192.0.2.41";
+  x.mac = "48:AF:F3:00:00:00";
+  x.rssi = -61;
+  x.mqttHost = "homeassistant.local";
+  x.mqttIp = "192.0.2.10";
+  x.mqttPort = 1883;
+  x.deviceId = "gpsdo_cyd_000000";
+  x.publishes = 152;
+  x.lastPublishAgeS = 4;
+  x.mqttUpS = 1520;
   for (int s = 0; s < Ui::kScreens; ++s) {
     ui.show(s);
     ui.update(mon, x, gNowMs);

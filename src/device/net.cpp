@@ -18,6 +18,9 @@ uint32_t lastAttemptMs = 0, lastPublishMs = 0, retryMs = 5000;
 bool txPowerSet = false;
 std::string lastKey;
 std::string deviceId;
+std::string lastError, brokerIp;
+uint32_t publishes = 0, connectedAtMs = 0;
+bool everPublished = false;
 
 const char* statusTopic() { return MQTT_BASE "/status"; }
 const char* stateTopic() { return MQTT_BASE "/state"; }
@@ -65,9 +68,11 @@ void Net::loop(const Monitor& m, uint32_t nowMs) {
     IPAddress ip;
     if (!WiFi.hostByName(cfg.mqttHost.c_str(), ip)) {
       Serial.printf("# MQTT: DNS lookup for %s failed, retrying\n", cfg.mqttHost.c_str());
+      lastError = "DNS lookup for " + std::string(cfg.mqttHost.c_str()) + " failed";
       retryMs = retryMs < 60000 ? retryMs * 2 : 60000;
       return;
     }
+    brokerIp = ip.toString().c_str();
     mqtt.setServer(ip, cfg.mqttPort);
     bool ok = cfg.mqttUser.length()
                   ? mqtt.connect(deviceId.c_str(), cfg.mqttUser.c_str(), cfg.mqttPass.c_str(), statusTopic(), 1, true, "offline")
@@ -75,10 +80,14 @@ void Net::loop(const Monitor& m, uint32_t nowMs) {
     if (!ok) {
       Serial.printf("# MQTT: connect to %s (%s):%u failed, state %d\n", cfg.mqttHost.c_str(), ip.toString().c_str(),
                     cfg.mqttPort, mqtt.state());
+      char e[48];
+      snprintf(e, sizeof e, "MQTT connect failed, state %d", mqtt.state());
+      lastError = e;
       retryMs = retryMs < 60000 ? retryMs * 2 : 60000;
       return;
     }
     retryMs = 5000;
+    connectedAtMs = nowMs;
     Serial.printf("# MQTT: connected to %s (%s):%u\n", cfg.mqttHost.c_str(), ip.toString().c_str(), cfg.mqttPort);
     announce();
     lastKey.clear();
@@ -91,6 +100,8 @@ void Net::loop(const Monitor& m, uint32_t nowMs) {
     if (mqtt.publish(stateTopic(), j.c_str(), true)) {
       lastKey = key;
       lastPublishMs = nowMs;
+      ++publishes;
+      everPublished = true;
     }
   }
 }
@@ -99,6 +110,22 @@ void Net::fill(UiExtras& x) const {
   x.wifiEnabled = enabled;
   x.wifiConnected = enabled && WiFi.status() == WL_CONNECTED;
   x.mqttConnected = enabled && mqtt.connected();
+  if (!enabled) return;
+  uint32_t now = millis();
+  x.ssid = cfg.wifiSsid.c_str();
+  x.mac = WiFi.macAddress().c_str();
+  if (x.wifiConnected) {
+    x.ip = WiFi.localIP().toString().c_str();
+    x.rssi = WiFi.RSSI();
+  }
+  x.mqttHost = cfg.mqttHost.c_str();
+  x.mqttPort = cfg.mqttPort;
+  x.mqttIp = brokerIp;
+  x.deviceId = deviceId;
+  x.lastError = lastError;
+  x.publishes = publishes;
+  if (everPublished) x.lastPublishAgeS = (now - lastPublishMs) / 1000;
+  if (x.mqttConnected) x.mqttUpS = (now - connectedAtMs) / 1000;
 }
 
 }  // namespace gpsdo

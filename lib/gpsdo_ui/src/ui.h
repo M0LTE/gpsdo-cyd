@@ -2,6 +2,7 @@
 // Builds on any LVGL 9 display; the firmware and the PC simulator both use it.
 #pragma once
 #include <cstdint>
+#include <string>
 
 #include "monitor.h"
 
@@ -12,12 +13,19 @@ struct UiExtras {
   bool wifiEnabled = false;
   bool wifiConnected = false;
   bool mqttConnected = false;
+  // Network screen details (empty when unknown).
+  std::string ssid, ip, mac, mqttHost, mqttIp, lastError, deviceId;
+  int rssi = 0;
+  uint16_t mqttPort = 0;
+  uint32_t publishes = 0;
+  uint32_t lastPublishAgeS = UINT32_MAX;
+  uint32_t mqttUpS = 0;  // seconds since the current MQTT session started
 };
 
 class Ui {
 public:
-  static constexpr int kScreens = 5;
-  enum Screen { kStatus = 0, kTime = 1, kSky = 2, kBars = 3, kTrends = 4 };
+  static constexpr int kScreens = 6;
+  enum Screen { kStatus = 0, kTime = 1, kSky = 2, kBars = 3, kTrends = 4, kNetwork = 5 };
 
   void begin();
   // Refresh the visible screen from the monitor. Call about once a second.
@@ -37,6 +45,8 @@ private:
   void buildTrends();
   void buildTime();
   void updateTime(const Monitor& m, uint32_t nowMs);
+  void buildNetwork();
+  void updateNetwork(const UiExtras& x);
   void updateStatus(const Monitor& m, uint32_t nowMs);
   void updateSky(const Monitor& m, uint32_t nowMs);
   void updateBars(const Monitor& m, uint32_t nowMs);
@@ -49,6 +59,10 @@ private:
   void* footerNano_[kScreens] = {};
   void* footerPage_[kScreens] = {};
   void* footerRef_[kScreens] = {};
+  static constexpr int kNetRows = 9;
+  void* netKey_[kNetRows] = {};
+  void* netVal_[kNetRows] = {};
+  void* netTitle_ = nullptr;
   void *setup_ = nullptr, *setupNet_ = nullptr, *setupPass_ = nullptr, *setupUrl_ = nullptr, *setupStatus_ = nullptr,
        *setupLeft_ = nullptr;
 

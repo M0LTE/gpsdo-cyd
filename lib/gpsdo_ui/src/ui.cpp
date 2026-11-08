@@ -139,6 +139,7 @@ void Ui::begin() {
   buildBars();
   buildTrends();
   buildTime();
+  buildNetwork();
   for (int i = 0; i < kScreens; ++i) {
     // The footer is the "can I trust the 10 MHz right now" strip, the same on every screen.
     lv_obj_t* f = box(O(screens_[i]), 0, kH - kFooterH, kW, kFooterH, kGrey, 0);
@@ -671,6 +672,68 @@ void Ui::fastUpdate(const Monitor& m, uint32_t nowMs) {
   }
 }
 
+// ---------------------------------------------------------------- Network
+
+void Ui::buildNetwork() {
+  lv_obj_t* s = newScreen();
+  screens_[kNetwork] = s;
+  netTitle_ = text(s, &lv_font_montserrat_12, kText, 8, 8, "NETWORK");
+  const char* keys[kNetRows] = {"Wi-Fi", "Signal", "IP address", "MAC", "MQTT broker", "Broker IP", "MQTT", "Published",
+                                "Last error"};
+  text(s, &lv_font_montserrat_10, kFaint, 96, 10, "topics gpsdo/state, gpsdo/status");
+  for (int i = 0; i < kNetRows; ++i) {
+    int y = 28 + i * 19;
+    netKey_[i] = text(s, &lv_font_montserrat_12, kDim, 8, y, keys[i]);
+    netVal_[i] = text(s, &lv_font_montserrat_12, kText, 96, y, "");
+    lv_obj_set_size(O(netVal_[i]), kW - 104, 16);  // one line, "..." if too long
+    lv_label_set_long_mode(O(netVal_[i]), LV_LABEL_LONG_DOT);
+  }
+  lv_obj_t* hint = text(s, &lv_font_montserrat_10, kFaint, 8, kH - kFooterH - 14,
+                        "To change these, hold the screen while the display starts up.");
+  (void)hint;
+}
+
+void Ui::updateNetwork(const UiExtras& x) {
+  char b[96];
+  auto set = [&](int row, const std::string& v, uint32_t color = kText) {
+    setText(netVal_[row], v.empty() ? "-" : v.c_str());
+    setColor(netVal_[row], v.empty() ? kFaint : color);
+  };
+  if (!x.wifiEnabled) {
+    set(0, "off (not set up)", kFaint);
+    for (int i = 1; i < kNetRows; ++i) set(i, "");
+    return;
+  }
+  set(0, x.ssid + (x.wifiConnected ? "" : "  (not connected)"), x.wifiConnected ? kText : kAmber);
+  if (x.wifiConnected) {
+    const char* q = x.rssi >= -60 ? "good" : x.rssi >= -72 ? "fair" : "weak";
+    std::snprintf(b, sizeof b, "%d dBm (%s)", x.rssi, q);
+    set(1, b, x.rssi >= -72 ? kText : kAmber);
+  } else {
+    set(1, "");
+  }
+  set(2, x.wifiConnected ? x.ip : "");
+  set(3, x.mac);
+  std::snprintf(b, sizeof b, "%s:%u", x.mqttHost.c_str(), (unsigned)x.mqttPort);
+  set(4, b);
+  set(5, x.mqttIp);
+  if (x.mqttConnected) {
+    char d[24];
+    fmtDuration(d, sizeof d, x.mqttUpS);
+    std::snprintf(b, sizeof b, "connected for %s", d);
+    set(6, b, kGreen);
+  } else {
+    set(6, "not connected", kAmber);
+  }
+  if (x.lastPublishAgeS != UINT32_MAX) {
+    std::snprintf(b, sizeof b, "%u, last %us ago", (unsigned)x.publishes, (unsigned)x.lastPublishAgeS);
+    set(7, b);
+  } else {
+    set(7, "");
+  }
+  set(8, x.lastError, kAmber);
+}
+
 // ---------------------------------------------------------------- Wi-Fi setup
 
 void Ui::showSetup(const char* apSsid, const char* apPass, const char* url, const char* status, uint32_t secondsLeft) {
@@ -734,6 +797,7 @@ void Ui::update(const Monitor& m, const UiExtras& x, uint32_t nowMs) {
     case kBars: updateBars(m, nowMs); break;
     case kTrends: updateTrends(m); break;
     case kTime: updateTime(m, nowMs); break;
+    case kNetwork: updateNetwork(x); break;
   }
   updateFooter(current_, m, x, nowMs);
 }
