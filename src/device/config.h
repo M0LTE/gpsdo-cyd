@@ -9,6 +9,10 @@
 #define GPS_BAUD 9600    // confirm from the u-blox capture
 #endif
 
+// Optional: the GPSDO's buffered 1PPS output, through a 10k/20k divider, on CN1. Either polarity
+// works: the firmware picks the edge that comes just before the Nano's report.
+#define PPS_PIN 27
+
 // Touch controller (XPT2046) on its own SPI bus.
 #define TOUCH_CS 33
 #define TOUCH_IRQ 36

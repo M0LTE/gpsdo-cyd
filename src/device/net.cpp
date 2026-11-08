@@ -4,6 +4,7 @@
 #include <WiFi.h>
 
 #include "config.h"
+#include "ntp_server.h"
 #include "state_json.h"
 
 #define MQTT_BASE "gpsdo"  // topics: gpsdo/state, gpsdo/status
@@ -45,6 +46,10 @@ void Net::begin(const Settings& s) {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
+  // No modem sleep: sleeping between beacons delays incoming NTP requests by up to ~100 ms but
+  // not the replies, and that one-sided delay shows up to clients as a time offset. Staying
+  // awake only keeps the receiver on; it adds no transmissions.
+  WiFi.setSleep(false);
   WiFi.begin(cfg.wifiSsid.c_str(), cfg.wifiPass.c_str());
   WiFi.setTxPower(WIFI_TX_POWER);
   uint8_t mac[6];
@@ -55,12 +60,18 @@ void Net::begin(const Settings& s) {
   mqtt.setBufferSize(1024);
   mqtt.setKeepAlive(30);
   mqtt.setSocketTimeout(5);
+  NtpServer::begin();
 }
 
 void Net::loop(const Monitor& m, uint32_t nowMs) {
   if (!enabled) return;
   if (WiFi.status() != WL_CONNECTED) { txPowerSet = false; return; }
-  if (!txPowerSet) { WiFi.setTxPower(WIFI_TX_POWER); txPowerSet = true; }
+  if (!txPowerSet) {
+    WiFi.setTxPower(WIFI_TX_POWER);
+    txPowerSet = true;
+    Serial.printf("# Wi-Fi: joined %s as %s, signal %d dBm\n", cfg.wifiSsid.c_str(), WiFi.localIP().toString().c_str(),
+                  WiFi.RSSI());
+  }
   if (!mqtt.connected()) {
     if (nowMs - lastAttemptMs < retryMs) return;
     lastAttemptMs = nowMs;
@@ -126,6 +137,8 @@ void Net::fill(UiExtras& x) const {
   x.publishes = publishes;
   if (everPublished) x.lastPublishAgeS = (now - lastPublishMs) / 1000;
   if (x.mqttConnected) x.mqttUpS = (now - connectedAtMs) / 1000;
+  x.ntpRequests = NtpServer::requests();
+  x.ntpSynced = NtpServer::synced();
 }
 
 }  // namespace gpsdo

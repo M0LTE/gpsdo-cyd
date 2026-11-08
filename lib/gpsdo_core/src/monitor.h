@@ -51,15 +51,20 @@ public:
   static constexpr uint32_t kTrendStepS = 2;        // one stored point per 2 Nano seconds
   static constexpr size_t kTrendPoints = 900;       // 30 minutes
 
-  // startMs: when the line's first byte arrived (marks the PPS edge); defaults to nowMs.
-  void onNanoLine(const std::string& line, uint32_t nowMs, uint32_t startMs);
-  void onNanoLine(const std::string& line, uint32_t nowMs) { onNanoLine(line, nowMs, nowMs); }
-  // burstStartMs: when the first byte of this second's NMEA burst arrived; defaults to nowMs.
-  void onGpsLine(const std::string& line, uint32_t nowMs, uint32_t burstStartMs);
-  void onGpsLine(const std::string& line, uint32_t nowMs) { onGpsLine(line, nowMs, nowMs); }
+  // startUs: local microseconds when the line's first byte arrived. For the Nano that marks the
+  // PPS edge (the report starts right after it); for NMEA it pairs the sentence with its second.
+  // The short forms take it as nowMs, which is fine for tests and replay.
+  void onNanoLine(const std::string& line, uint32_t nowMs, int64_t startUs);
+  void onNanoLine(const std::string& line, uint32_t nowMs) { onNanoLine(line, nowMs, (int64_t)nowMs * 1000); }
+  void onGpsLine(const std::string& line, uint32_t nowMs, int64_t startUs);
+  void onGpsLine(const std::string& line, uint32_t nowMs) { onGpsLine(line, nowMs, (int64_t)nowMs * 1000); }
+  // A PPS edge timed directly (if the PPS is wired to the display). Preferred over the Nano's report.
+  void onPpsEdge(int64_t us) { lastPpsUs_ = us; havePps_ = true; clock_.onSecondMark(us); }
   const UtcClock& clock() const { return clock_; }
-  // Delay from the PPS edge to the first byte of the Nano's report line.
-  static constexpr uint32_t kNanoPrintDelayMs = 0;
+  // Delay from the PPS edge to the first byte of the Nano's report line (measured, see README).
+  // Measured 2026-11-08 against NTP (stratum 2, 0.03 ms) over Wi-Fi, lowest-delay samples: the
+  // CYD read 5.8 ms slow without it. Remeasure directly once the PPS is wired (console reports it).
+  static constexpr int64_t kNanoPrintDelayUs = 5800;
   void onUbxSeen() { nmea_.noteUbx(); }
   // Call about once a second: expires satellites and recomputes alarms.
   void tick(uint32_t nowMs);
@@ -104,6 +109,8 @@ private:
   ReportTracker nano_;
   NmeaParser nmea_;
   UtcClock clock_;
+  int64_t lastPpsUs_ = 0;
+  bool havePps_ = false;
   bool gpsSeen_ = false;
   uint32_t lastHelpMs_ = 0;
   bool sawHelp_ = false;

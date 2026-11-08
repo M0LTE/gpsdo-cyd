@@ -20,6 +20,8 @@ struct UiExtras {
   uint32_t publishes = 0;
   uint32_t lastPublishAgeS = UINT32_MAX;
   uint32_t mqttUpS = 0;  // seconds since the current MQTT session started
+  uint32_t ntpRequests = 0;
+  bool ntpSynced = false;
 };
 
 class Ui {
@@ -33,7 +35,8 @@ public:
   void show(int screen);
   void next() { show((current_ + 1) % kScreens); }
   // Call often (every ~50 ms) to keep the tenths moving on the time screen; cheap otherwise.
-  void fastUpdate(const Monitor& m, uint32_t nowMs);
+  // nowUs is on the same local microsecond clock as the timestamps given to the monitor.
+  void fastUpdate(const Monitor& m, int64_t nowUs);
   int current() const { return current_; }
   // Full-screen Wi-Fi setup instructions, shown while the setup portal runs.
   void showSetup(const char* apSsid, const char* apPass, const char* url, const char* status, uint32_t secondsLeft);
@@ -71,7 +74,7 @@ private:
   void* clockChar_[kClockChars] = {};
   void *dateLabel_ = nullptr, *clockSource_ = nullptr;
   void *locLabel_ = nullptr, *latLabel_ = nullptr, *lonLabel_ = nullptr, *altLabel_ = nullptr;
-  uint32_t lastClockMs_ = UINT32_MAX;
+  int64_t lastClockDs_ = -1;
 
   // Status
   void *banner_ = nullptr, *headline_ = nullptr, *subline_ = nullptr;

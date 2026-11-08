@@ -13,12 +13,14 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
+#include <esp_timer.h>
 #include <lvgl.h>
 
 #include "config.h"
 #include "line_assembler.h"
 #include "monitor.h"
 #include "net.h"
+#include "ntp_server.h"
 #include "portal.h"
 #include "settings.h"
 #include "ui.h"
@@ -46,8 +48,66 @@ uint32_t lastTickMs = 0;
 bool wasTouched = false;
 uint32_t lastTouchMs = 0;
 uint8_t prevGpsByte = 0;
-uint32_t nanoLineStartMs = 0, gpsBurstStartMs = 0, lastGpsByteMs = 0, lastFastMs = 0;
-bool nanoInLine = false;
+uint32_t lastFastMs = 0;
+int64_t gpsLineStartUs = 0;
+bool gpsInLine = false;
+
+// Timestamps taken in interrupt-ish context, read by the loop under a lock (64-bit values).
+portMUX_TYPE tsMux = portMUX_INITIALIZER_UNLOCKED;
+int64_t nanoRxUs = 0, nanoLineStartUs = 0;  // last Nano receive event; first byte of the current line
+volatile int64_t ppsRiseUs = 0, ppsFallUs = 0;
+volatile uint32_t ppsEdges = 0;
+
+// UART event callback for the Nano: with the RX FIFO threshold at 1 byte it fires right after the
+// first byte of a report line, which the Nano sends straight after each PPS edge.
+void onNanoRx() {
+  int64_t now = esp_timer_get_time();
+  portENTER_CRITICAL(&tsMux);
+  if (now - nanoRxUs > 300000) nanoLineStartUs = now;  // a gap: this is the start of a new line
+  nanoRxUs = now;
+  portEXIT_CRITICAL(&tsMux);
+}
+
+void IRAM_ATTR onPpsEdge() {
+  int64_t now = esp_timer_get_time();
+  if (digitalRead(PPS_PIN)) ppsRiseUs = now;
+  else ppsFallUs = now;
+  ppsEdges = ppsEdges + 1;
+}
+
+int64_t nanoStartUs() {
+  portENTER_CRITICAL(&tsMux);
+  int64_t v = nanoLineStartUs;
+  portEXIT_CRITICAL(&tsMux);
+  return v;
+}
+
+// Which PPS edge is the top of the second: the one just before each Nano report (0 to 60 ms
+// earlier), confirmed on 3 reports in a row. 0 = not known, 1 = rising, 2 = falling.
+int ppsEdgeKind = 0, ppsVotes = 0, ppsVoteKind = 0;
+int64_t lastPpsFedUs = 0;
+int64_t delaySum = 0;
+int delayCount = 0;
+uint32_t lastDelayReportMs = 0;
+
+void judgePps(int64_t nanoStart) {
+  portENTER_CRITICAL(&tsMux);
+  int64_t r = ppsRiseUs, f = ppsFallUs;
+  portEXIT_CRITICAL(&tsMux);
+  int kind = 0;
+  if (r && nanoStart - r >= 0 && nanoStart - r < 60000) kind = 1;
+  else if (f && nanoStart - f >= 0 && nanoStart - f < 60000) kind = 2;
+  if (kind && kind == ppsVoteKind) ++ppsVotes;
+  else { ppsVoteKind = kind; ppsVotes = kind ? 1 : 0; }
+  if (ppsVotes >= 3 && ppsEdgeKind != kind) {
+    ppsEdgeKind = kind;
+    Serial.printf("# PPS input found on IO%d, %s edge marks the second\n", PPS_PIN, kind == 1 ? "rising" : "falling");
+  }
+  if (ppsEdgeKind) {
+    int64_t e = ppsEdgeKind == 1 ? r : f;
+    if (nanoStart - e >= 0 && nanoStart - e < 60000) { delaySum += nanoStart - e; ++delayCount; }
+  }
+}
 
 uint32_t tickCb() { return millis(); }
 
@@ -59,23 +119,19 @@ void pumpUart(HardwareSerial& port, LineAssembler& lines, bool gps) {
     if (gps) {
       if (prevGpsByte == 0xB5 && c == 0x62) monitor.onUbxSeen();
       prevGpsByte = c;
-      // A gap marks the start of the next once-a-second NMEA burst.
-      if (now - lastGpsByteMs > 300) gpsBurstStartMs = now;
-      lastGpsByteMs = now;
-    } else if (!nanoInLine && c != '\r' && c != '\n') {
-      // First byte of a report line: the Nano starts printing right after each PPS edge.
-      // The UART buffer can delay our read, so this is only as good as the loop is quick.
-      nanoLineStartMs = now;
-      nanoInLine = true;
+      if (!gpsInLine) { gpsLineStartUs = esp_timer_get_time(); gpsInLine = true; }
     }
     if (!lines.push((char)c)) continue;
     const std::string& l = lines.line();
     Serial.print(gps ? "G> " : "N> ");
     Serial.println(l.c_str());
-    if (gps) monitor.onGpsLine(l, now, gpsBurstStartMs);
-    else {
-      monitor.onNanoLine(l, now, nanoLineStartMs);
-      nanoInLine = false;
+    if (gps) {
+      monitor.onGpsLine(l, now, gpsLineStartUs);
+      gpsInLine = false;
+    } else {
+      int64_t start = nanoStartUs();
+      judgePps(start);
+      monitor.onNanoLine(l, now, start);
     }
   }
 }
@@ -115,6 +171,10 @@ void setup() {
   // Generous buffers: an MQTT reconnect can block the loop for several seconds.
   nanoSerial.setRxBufferSize(4096);
   nanoSerial.begin(NANO_BAUD, SERIAL_8N1, NANO_RX_PIN, -1);
+  nanoSerial.setRxFIFOFull(1);
+  nanoSerial.onReceive(onNanoRx, false);
+  pinMode(PPS_PIN, INPUT_PULLDOWN);  // quiet when nothing is wired to it
+  attachInterrupt(digitalPinToInterrupt(PPS_PIN), onPpsEdge, CHANGE);
   gpsSerial.setRxBufferSize(8192);
   gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, -1);
 
@@ -168,9 +228,30 @@ void loop() {
       ui.update(monitor, x, now);
     }
   }
+  // Feed the PPS edge to the clock as soon as it is seen, if the PPS input is wired and known.
+  if (ppsEdgeKind) {
+    portENTER_CRITICAL(&tsMux);
+    int64_t e = ppsEdgeKind == 1 ? ppsRiseUs : ppsFallUs;
+    portEXIT_CRITICAL(&tsMux);
+    if (e != lastPpsFedUs) { lastPpsFedUs = e; monitor.onPpsEdge(e); }
+  }
+  if (delayCount >= 60 && now - lastDelayReportMs > 60000) {
+    lastDelayReportMs = now;
+    Serial.printf("# PPS edge to Nano report: mean %.2f ms over %d s\n", delaySum / 1000.0 / delayCount, delayCount);
+    delaySum = 0;
+    delayCount = 0;
+  }
+  // Keep the NTP server's view of the clock fresh.
+  int64_t nowUs = esp_timer_get_time(), unixUs;
+  bool aligned;
+  if (monitor.clock().now(nowUs, unixUs, aligned)) {
+    bool gpsGood = !(monitor.alarms() & (kAlarmGpsNoFix | kAlarmGpsSilent));
+    bool ppsWired = ppsEdgeKind && nowUs - lastPpsFedUs < 2500000;
+    NtpServer::setClock(nowUs, unixUs, aligned && gpsGood, ppsWired ? 200 : 5000);
+  }
   if (now - lastFastMs >= 50) {
     lastFastMs = now;
-    ui.fastUpdate(monitor, now);
+    ui.fastUpdate(monitor, nowUs);
   }
   lv_timer_handler();
   delay(5);

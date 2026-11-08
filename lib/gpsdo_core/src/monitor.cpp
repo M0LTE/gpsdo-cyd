@@ -18,7 +18,7 @@ const char* headlineText(Headline h) {
   return "?";
 }
 
-void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, uint32_t startMs) {
+void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startUs) {
   ParsedLine p = parseReportLine(line);
   if (p.kind != LineKind::Empty) { nanoHeard_ = true; lastNanoLineMs_ = nowMs; }
   // The f1 help text reprints the start-up banner straight after its first line; that's no restart.
@@ -32,7 +32,8 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, uint32_t start
   if (p.kind != LineKind::Data) { tick(nowMs); return; }
   const ReportLine& d = p.data;
   missing10MHz_ = d.missing10MHz;
-  clock_.onSecondMark(startMs - kNanoPrintDelayMs);
+  // Use the report as the second mark unless the PPS itself is wired and live.
+  if (!d.missing10MHz && !(havePps_ && startUs - lastPpsUs_ < 2500000)) clock_.onSecondMark(startUs - kNanoPrintDelayUs);
   if (d.status != LockStatus::Locked) {
     if (wasLocked || !haveUnlockStart_ || d.time < unlockedSinceNanoTime_) {
       unlockedSinceNanoTime_ = d.time;
@@ -48,7 +49,7 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, uint32_t start
   tick(nowMs);
 }
 
-void Monitor::onGpsLine(const std::string& line, uint32_t nowMs, uint32_t burstStartMs) {
+void Monitor::onGpsLine(const std::string& line, uint32_t nowMs, int64_t startUs) {
   if (line.empty() || line[0] != '$') return;
   // Checked before the checksum: after a power cut the boot text can arrive glued to a sentence
   // that was cut off, so the whole line fails its checksum.
@@ -59,9 +60,10 @@ void Monitor::onGpsLine(const std::string& line, uint32_t nowMs, uint32_t burstS
   uint32_t sets = nmea_.utcSetCount();
   if (!nmea_.parse(line, nowMs)) return;
   gpsSeen_ = true;
-  if (nmea_.utcSetCount() != sets) {
+  if (nmea_.utcSetCount() != sets && nmea_.utc().dateValid) {
     const UtcTime& u = nmea_.utc();
-    clock_.onNmeaTime((uint32_t)u.hour * 3600 + u.minute * 60 + u.second, burstStartMs);
+    int64_t unixSec = daysFromCivil(u.year, u.month, u.day) * 86400 + u.hour * 3600 + u.minute * 60 + u.second;
+    clock_.onNmeaTime(unixSec, startUs);
   }
 }
 

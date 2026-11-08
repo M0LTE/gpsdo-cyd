@@ -1,8 +1,9 @@
-// UTC to the hundredth of a second from two imperfect sources:
-//  - NMEA says which second it is, but arrives a variable 50 to 200 ms after it starts;
-//  - the Nano starts its report a fixed few ms after each PPS edge, so the start of a report
-//    line marks the top of the second precisely, but says nothing about which second.
-// Combining them gives the second from NMEA and the fraction from the PPS-derived mark.
+// UTC from two imperfect sources, in microseconds of a local monotonic clock:
+//  - second marks: the start of each UTC second, from the PPS (or the Nano's PPS-triggered report)
+//    but with no idea which second it is;
+//  - NMEA time sentences: which second it is, but arriving a variable time after it starts.
+// Each time sentence is paired with the latest mark before it (it must be under a second old),
+// which ties a UTC second to a local timestamp. Later marks then carry the time forward.
 #pragma once
 #include <cstdint>
 
@@ -10,41 +11,62 @@ namespace gpsdo {
 
 class UtcClock {
 public:
-  // Rough delay from the top of a second to the first NMEA byte of that epoch.
-  static constexpr uint32_t kNmeaLatencyMs = 100;
-  // A second mark older than this is not used for the fraction.
-  static constexpr uint32_t kMarkMaxAgeMs = 2500;
+  static constexpr int64_t kNmeaLatencyUs = 100000;  // rough NMEA delay, used only without marks
+  static constexpr int64_t kMarkMaxAgeUs = 2500000;  // a mark older than this means no PPS
+  static constexpr int64_t kNmeaMaxAgeUs = 5000000;  // NMEA older than this means no GPS time
 
-  // Top of a UTC second, local ms (already corrected for the Nano's print delay).
-  void onSecondMark(uint32_t ms) { markMs_ = ms; haveMark_ = true; }
-  // A NMEA time of day (seconds since midnight) whose sentence burst started at burstStartMs.
-  void onNmeaTime(uint32_t secOfDay, uint32_t burstStartMs) {
-    nmeaSec_ = secOfDay;
-    nmeaMs_ = burstStartMs;
-    haveNmea_ = true;
+  void onSecondMark(int64_t us) {
+    prevMarkUs_ = markUs_;
+    havePrevMark_ = haveMark_;
+    markUs_ = us;
+    haveMark_ = true;
   }
 
-  // Current UTC as milliseconds of the day. ppsAligned says whether the fraction is from the
-  // second mark (good to a few ms) or only from NMEA (good to about 0.1 s). False if unknown.
-  bool now(uint32_t nowMs, uint32_t& msOfDay, bool& ppsAligned) const {
-    if (!haveNmea_ || nowMs - nmeaMs_ > 5000) return false;
-    int64_t rough = (int64_t)nmeaSec_ * 1000 + (int64_t)(nowMs - nmeaMs_) + kNmeaLatencyMs;
-    ppsAligned = haveMark_ && nowMs - markMs_ <= kMarkMaxAgeMs;
-    int64_t t = rough;
-    if (ppsAligned) {
-      int64_t frac = (int64_t)((nowMs - markMs_) % 1000);
-      int64_t sec = (rough - frac + 500) / 1000;  // nearest whole second consistent with the mark
-      t = sec * 1000 + frac;
+  // A time sentence for UTC second unixSec whose first byte arrived at sentenceUs.
+  void onNmeaTime(int64_t unixSec, int64_t sentenceUs) {
+    nmeaSec_ = unixSec;
+    nmeaUs_ = sentenceUs;
+    haveNmea_ = true;
+    // Pair with the latest mark at or before the sentence, if under a second before it.
+    int64_t m = -1;
+    if (haveMark_ && markUs_ <= sentenceUs) m = markUs_;
+    else if (havePrevMark_ && prevMarkUs_ <= sentenceUs) m = prevMarkUs_;
+    if (m >= 0 && sentenceUs - m < 1000000) {
+      anchorSec_ = unixSec;
+      anchorUs_ = m;
+      haveAnchor_ = true;
     }
-    t %= 86400000LL;
-    if (t < 0) t += 86400000LL;
-    msOfDay = (uint32_t)t;
+  }
+
+  // Current UTC as microseconds since 1970. ppsAligned: the fraction comes from a recent second mark
+  // (good to the mark's accuracy) rather than from NMEA alone (good to about 0.1 s).
+  bool now(int64_t nowUs, int64_t& unixUs, bool& ppsAligned) const {
+    if (!haveNmea_ || nowUs - nmeaUs_ > kNmeaMaxAgeUs) return false;
+    ppsAligned = haveAnchor_ && haveMark_ && nowUs - markUs_ <= kMarkMaxAgeUs && markUs_ >= anchorUs_ &&
+                 nowUs - anchorUs_ < 3600LL * 1000000;
+    if (ppsAligned) {
+      // Whole seconds between the anchor's mark and the latest mark, then the fraction since it.
+      int64_t secs = (markUs_ - anchorUs_ + 500000) / 1000000;
+      unixUs = (anchorSec_ + secs) * 1000000 + (nowUs - markUs_);
+    } else {
+      unixUs = nmeaSec_ * 1000000 + (nowUs - nmeaUs_) + kNmeaLatencyUs;
+    }
     return true;
   }
 
 private:
-  uint32_t markMs_ = 0, nmeaMs_ = 0, nmeaSec_ = 0;
-  bool haveMark_ = false, haveNmea_ = false;
+  int64_t markUs_ = 0, prevMarkUs_ = 0, nmeaUs_ = 0, nmeaSec_ = 0, anchorUs_ = 0, anchorSec_ = 0;
+  bool haveMark_ = false, havePrevMark_ = false, haveNmea_ = false, haveAnchor_ = false;
 };
+
+// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's algorithm).
+inline int64_t daysFromCivil(int y, unsigned m, unsigned d) {
+  y -= m <= 2;
+  const int64_t era = (y >= 0 ? y : y - 399) / 400;
+  const unsigned yoe = (unsigned)(y - era * 400);
+  const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + (int64_t)doe - 719468;
+}
 
 }  // namespace gpsdo

@@ -187,6 +187,7 @@ int main(int argc, char** argv) {
   for (int s = 0; s < Ui::kScreens; ++s) {
     ui.show(s);
     ui.update(mon, x, gNowMs);
+    ui.fastUpdate(mon, (int64_t)gNowMs * 1000);
     lv_refr_now(disp);
     char path[512];
     std::snprintf(path, sizeof path, "%s-%d.ppm", out.c_str(), s + 1);

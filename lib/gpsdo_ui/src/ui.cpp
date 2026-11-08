@@ -647,22 +647,25 @@ void Ui::updateTime(const Monitor& m, uint32_t nowMs) {
     setText(lonLabel_, "");
     setText(altLabel_, "");
   }
-  lastClockMs_ = UINT32_MAX;  // force the clock to redraw
-  fastUpdate(m, nowMs);
+  lastClockDs_ = -1;  // force the clock to redraw at the next fastUpdate
 }
 
-void Ui::fastUpdate(const Monitor& m, uint32_t nowMs) {
+void Ui::fastUpdate(const Monitor& m, int64_t nowUs) {
   if (current_ != kTime) return;
-  uint32_t t;
+  int64_t u;
   bool pps;
   char b[16];
-  if (!m.clock().now(nowMs, t, pps)) {
+  if (!m.clock().now(nowUs, u, pps)) {
+    if (lastClockDs_ == -2) return;
+    lastClockDs_ = -2;
     std::snprintf(b, sizeof b, "--:--:--.-");
     setText(clockSource_, m.gpsEverSeen() ? "waiting for GPS time" : "no GPS data");
   } else {
-    unsigned ds = (t % 1000) / 100, sec = (t / 1000) % 60, min = (t / 60000) % 60, hr = t / 3600000;
-    if (t / 100 == lastClockMs_) return;
-    lastClockMs_ = t / 100;
+    int64_t t = u % 86400000000LL;  // microseconds of the UTC day
+    if (t / 100000 == lastClockDs_) return;
+    lastClockDs_ = t / 100000;
+    unsigned ds = (unsigned)((t / 100000) % 10), sec = (unsigned)((t / 1000000) % 60),
+             min = (unsigned)((t / 60000000) % 60), hr = (unsigned)(t / 3600000000LL);
     std::snprintf(b, sizeof b, "%02u:%02u:%02u.%u", hr, min, sec, ds);
     setText(clockSource_, pps ? "seconds aligned to the GPS pulse" : "from GPS messages only, may lag up to 0.1 s");
   }
@@ -678,7 +681,7 @@ void Ui::buildNetwork() {
   lv_obj_t* s = newScreen();
   screens_[kNetwork] = s;
   netTitle_ = text(s, &lv_font_montserrat_12, kText, 8, 8, "NETWORK");
-  const char* keys[kNetRows] = {"Wi-Fi", "Signal", "IP address", "MAC", "MQTT broker", "Broker IP", "MQTT", "Published",
+  const char* keys[kNetRows] = {"Wi-Fi", "Signal", "IP address", "NTP", "MQTT broker", "Broker IP", "MQTT", "Published",
                                 "Last error"};
   text(s, &lv_font_montserrat_10, kFaint, 96, 10, "topics gpsdo/state, gpsdo/status");
   for (int i = 0; i < kNetRows; ++i) {
@@ -713,7 +716,9 @@ void Ui::updateNetwork(const UiExtras& x) {
     set(1, "");
   }
   set(2, x.wifiConnected ? x.ip : "");
-  set(3, x.mac);
+  std::snprintf(b, sizeof b, "%s, %u requests answered", x.ntpSynced ? "stratum 1 (GPS)" : "not synced, clients told to ignore",
+                (unsigned)x.ntpRequests);
+  set(3, x.wifiConnected ? b : "", x.ntpSynced ? kGreen : kAmber);
   std::snprintf(b, sizeof b, "%s:%u", x.mqttHost.c_str(), (unsigned)x.mqttPort);
   set(4, b);
   set(5, x.mqttIp);
