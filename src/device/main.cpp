@@ -25,6 +25,7 @@
 #include "ntp_server.h"
 #include "portal.h"
 #include "settings.h"
+#include "watchdog.h"
 #include "web.h"
 #include "ui.h"
 
@@ -179,6 +180,7 @@ void pumpConsole() {
     if (!consoleLines.push((char)Serial.read())) continue;
     const std::string& l = consoleLines.line();
     if (l == "setup" && !portal.active()) { portal.begin(settings); continue; }
+    if (l == "test watchdog") { Serial.println("# hanging the loop to test the watchdog"); for (;;) delay(1000); }
     if (l == "clear events") { monitor.events() = EventLog(); Serial.println("# event log cleared"); continue; }
     if (l.size() < 2 || l[1] != ' ') continue;
     if (l[0] == 'N') monitor.onNanoLine(l.substr(2), millis());
@@ -209,6 +211,7 @@ void setup() {
   Serial.begin(CONSOLE_BAUD);
   Serial.println();
   Serial.println("# gpsdo-cyd starting");
+  Watchdog::begin();
 
   // Generous buffers: an MQTT reconnect can block the loop for several seconds.
   nanoSerial.setRxBufferSize(4096);
@@ -251,7 +254,10 @@ void setup() {
   Serial.printf("# ready, free heap %u\n", (unsigned)ESP.getFreeHeap());
 }
 
+bool resetReasonLogged = false;
+
 void loop() {
+  Watchdog::feed();
   pumpUart(nanoSerial, nanoLines, false);
   pumpUart(gpsSerial, gpsLines, true);
   pumpConsole();
@@ -269,6 +275,11 @@ void loop() {
   if (now - lastTickMs >= 1000) {
     lastTickMs = now;
     monitor.tick(now);
+    // Log an unexpected restart once the log has a UTC time to put on it (or after a minute).
+    if (!resetReasonLogged && Watchdog::lastResetReason() && (monitor.events().count() > 0 || now > 60000)) {
+      monitor.logEvent(now, 2, Watchdog::lastResetReason());
+      resetReasonLogged = true;
+    }
     beepOnVerdict();
     saveEventsIfChanged(now);
     if (portal.active()) {
