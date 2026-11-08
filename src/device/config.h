@@ -1,4 +1,4 @@
-// Fixed hardware facts for the CYD build. Wi-Fi and MQTT details go in include/secrets.h.
+// Fixed hardware facts for the CYD build. Wi-Fi and MQTT are set through the setup portal.
 #pragma once
 
 // Taps from the GPSDO, both on connector P3 (see WIRING.md). Receive only: no TX pin is routed.

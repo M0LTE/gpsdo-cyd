@@ -1,4 +1,3 @@
 .venv/
 .pio/
 ref/
-include/secrets.h

@@ -671,6 +671,35 @@ void Ui::fastUpdate(const Monitor& m, uint32_t nowMs) {
   }
 }
 
+// ---------------------------------------------------------------- Wi-Fi setup
+
+void Ui::showSetup(const char* apSsid, const char* apPass, const char* url, const char* status, uint32_t secondsLeft) {
+  if (!setup_) {
+    lv_obj_t* s = newScreen();
+    setup_ = s;
+    text(s, &lv_font_montserrat_20, kText, 12, 10, "Wi-Fi setup");
+    text(s, &lv_font_montserrat_12, kDim, 12, 44, "1. On your phone, join the Wi-Fi network");
+    setupNet_ = text(s, &lv_font_montserrat_20, kBlue, 24, 62, "");
+    text(s, &lv_font_montserrat_12, kDim, 12, 92, "   with the password");
+    setupPass_ = text(s, &lv_font_montserrat_20, kBlue, 24, 110, "");
+    text(s, &lv_font_montserrat_12, kDim, 12, 140, "2. The setup page should open. If not, browse to");
+    setupUrl_ = text(s, &lv_font_montserrat_16, kBlue, 24, 158, "");
+    setupStatus_ = text(s, &lv_font_montserrat_12, kAmber, 12, 188, "");
+    lv_obj_set_width(O(setupStatus_), kW - 24);
+    lv_label_set_long_mode(O(setupStatus_), LV_LABEL_LONG_WRAP);
+    setupLeft_ = text(s, &lv_font_montserrat_10, kFaint, 12, 224, "");
+  }
+  setText(setupNet_, apSsid);
+  setText(setupPass_, apPass);
+  setText(setupUrl_, url);
+  setText(setupStatus_, status);
+  char b[48];
+  std::snprintf(b, sizeof b, "closes in %u:%02u, then Wi-Fi stays off", (unsigned)(secondsLeft / 60),
+                (unsigned)(secondsLeft % 60));
+  setText(setupLeft_, b);
+  if (lv_screen_active() != O(setup_)) lv_screen_load(O(setup_));
+}
+
 // ---------------------------------------------------------------- Footer and dispatch
 
 void Ui::updateFooter(int i, const Monitor& m, const UiExtras& x, uint32_t nowMs) {

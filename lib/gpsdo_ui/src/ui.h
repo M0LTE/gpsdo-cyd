@@ -27,6 +27,8 @@ public:
   // Call often (every ~50 ms) to keep the tenths moving on the time screen; cheap otherwise.
   void fastUpdate(const Monitor& m, uint32_t nowMs);
   int current() const { return current_; }
+  // Full-screen Wi-Fi setup instructions, shown while the setup portal runs.
+  void showSetup(const char* apSsid, const char* apPass, const char* url, const char* status, uint32_t secondsLeft);
 
 private:
   void buildStatus();
@@ -47,6 +49,8 @@ private:
   void* footerNano_[kScreens] = {};
   void* footerPage_[kScreens] = {};
   void* footerRef_[kScreens] = {};
+  void *setup_ = nullptr, *setupNet_ = nullptr, *setupPass_ = nullptr, *setupUrl_ = nullptr, *setupStatus_ = nullptr,
+       *setupLeft_ = nullptr;
 
   // Time and position
   static constexpr int kClockChars = 10;  // HH:MM:SS.s
