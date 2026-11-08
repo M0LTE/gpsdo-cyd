@@ -40,6 +40,8 @@ uint32_t lastTickMs = 0;
 bool wasTouched = false;
 uint32_t lastTouchMs = 0;
 uint8_t prevGpsByte = 0;
+uint32_t nanoLineStartMs = 0, gpsBurstStartMs = 0, lastGpsByteMs = 0, lastFastMs = 0;
+bool nanoInLine = false;
 
 uint32_t tickCb() { return millis(); }
 
@@ -47,16 +49,28 @@ void pumpUart(HardwareSerial& port, LineAssembler& lines, bool gps) {
   // Bounded per call so a flood on one input cannot starve the UI.
   for (int n = 0; n < 512 && port.available(); ++n) {
     uint8_t c = (uint8_t)port.read();
+    uint32_t now = millis();
     if (gps) {
       if (prevGpsByte == 0xB5 && c == 0x62) monitor.onUbxSeen();
       prevGpsByte = c;
+      // A gap marks the start of the next once-a-second NMEA burst.
+      if (now - lastGpsByteMs > 300) gpsBurstStartMs = now;
+      lastGpsByteMs = now;
+    } else if (!nanoInLine && c != '\r' && c != '\n') {
+      // First byte of a report line: the Nano starts printing right after each PPS edge.
+      // The UART buffer can delay our read, so this is only as good as the loop is quick.
+      nanoLineStartMs = now;
+      nanoInLine = true;
     }
     if (!lines.push((char)c)) continue;
     const std::string& l = lines.line();
     Serial.print(gps ? "G> " : "N> ");
     Serial.println(l.c_str());
-    if (gps) monitor.onGpsLine(l, millis());
-    else monitor.onNanoLine(l, millis());
+    if (gps) monitor.onGpsLine(l, now, gpsBurstStartMs);
+    else {
+      monitor.onNanoLine(l, now, nanoLineStartMs);
+      nanoInLine = false;
+    }
   }
 }
 
@@ -123,6 +137,10 @@ void loop() {
     UiExtras x;
     net.fill(x);
     ui.update(monitor, x, now);
+  }
+  if (now - lastFastMs >= 50) {
+    lastFastMs = now;
+    ui.fastUpdate(monitor, now);
   }
   lv_timer_handler();
   delay(5);

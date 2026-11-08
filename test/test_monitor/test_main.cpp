@@ -99,6 +99,14 @@ void test_restart_counts() {
   TEST_ASSERT_TRUE(stateJson(m, 2000).find("\"gpsdo_restarts\":1") != std::string::npos);
 }
 
+void test_help_banner_is_not_a_restart() {
+  Monitor m;
+  m.onNanoLine("Info and help - To get values for gain etc type f2 <enter>, f3 <enter> reads ADC3 and f4 <enter> EEPROM", 1000);
+  m.onNanoLine("", 1000);
+  m.onNanoLine("Arduino GPSDO with 1ns TIC by Lars Walenius\tRev. 3.4 paulv mods  ID:0\t", 1001);
+  TEST_ASSERT_EQUAL_UINT32(0, m.gpsdoRestarts());
+}
+
 void test_earliest_lock_estimate() {
   Monitor m;
   m.onNanoLine(nanoLine(100, "Locked"), 0);
@@ -148,6 +156,7 @@ int main() {
   RUN_TEST(test_no_pps_headline);
   RUN_TEST(test_no_pps_after_boot_without_data);
   RUN_TEST(test_restart_counts);
+  RUN_TEST(test_help_banner_is_not_a_restart);
   RUN_TEST(test_earliest_lock_estimate);
   RUN_TEST(test_trend_ring);
   RUN_TEST(test_state_json);

@@ -36,6 +36,8 @@ struct Fix {
   float hdop = 0, pdop = 0, vdop = 0;
   bool haveAltitude = false;
   float altitudeM = 0;
+  bool haveLatLon = false;  // GGA position; shown on screen only, never published
+  double latDeg = 0, lonDeg = 0;
   uint8_t mode = 1;         // GSA: 1 none, 2 2D, 3 3D
   uint32_t ggaMs = 0, gsaMs = 0;
   bool haveGga = false, haveGsa = false;
@@ -54,6 +56,7 @@ public:
   const Fix& fix() const { return fix_; }
   const UtcTime& utc() const { return utc_; }
   uint32_t utcMs() const { return utcMs_; }         // when utc() was last set
+  uint32_t utcSetCount() const { return utcSets_; }  // increments each time utc() is set
 
   // Remove satellites not mentioned in a GSV for kExpireMs.
   void expire(uint32_t nowMs);
@@ -85,6 +88,7 @@ private:
   Fix fix_;
   UtcTime utc_;
   uint32_t utcMs_ = 0;
+  uint32_t utcSets_ = 0;
   std::array<Satellite, kMaxSats> sats_{};
   uint32_t good_ = 0, badChecksum_ = 0, lastGoodMs_ = 0;
   bool sawUbx_ = false;

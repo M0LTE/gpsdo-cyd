@@ -7,6 +7,7 @@
 
 #include "arduino_report.h"
 #include "nmea.h"
+#include "utc_clock.h"
 
 namespace gpsdo {
 
@@ -16,6 +17,8 @@ struct GpsdoConstants {
   static constexpr int kTicOffsetNs = 500;
   static constexpr int kLockPpsFactor = 5;
   static constexpr int kLockPpsLimitNs = 100;
+  // warmUpTime from f2: seconds after the first PPS before the loop runs. A timer, not a temperature.
+  static constexpr int kWarmUpS = 300;
 };
 
 enum Alarm : uint16_t {
@@ -48,8 +51,15 @@ public:
   static constexpr uint32_t kTrendStepS = 2;        // one stored point per 2 Nano seconds
   static constexpr size_t kTrendPoints = 900;       // 30 minutes
 
-  void onNanoLine(const std::string& line, uint32_t nowMs);
-  void onGpsLine(const std::string& line, uint32_t nowMs);
+  // startMs: when the line's first byte arrived (marks the PPS edge); defaults to nowMs.
+  void onNanoLine(const std::string& line, uint32_t nowMs, uint32_t startMs);
+  void onNanoLine(const std::string& line, uint32_t nowMs) { onNanoLine(line, nowMs, nowMs); }
+  // burstStartMs: when the first byte of this second's NMEA burst arrived; defaults to nowMs.
+  void onGpsLine(const std::string& line, uint32_t nowMs, uint32_t burstStartMs);
+  void onGpsLine(const std::string& line, uint32_t nowMs) { onGpsLine(line, nowMs, nowMs); }
+  const UtcClock& clock() const { return clock_; }
+  // Delay from the PPS edge to the first byte of the Nano's report line.
+  static constexpr uint32_t kNanoPrintDelayMs = 0;
   void onUbxSeen() { nmea_.noteUbx(); }
   // Call about once a second: expires satellites and recomputes alarms.
   void tick(uint32_t nowMs);
@@ -76,6 +86,11 @@ public:
   // While unlocked: the soonest the firmware could declare lock (5 x tc minus seconds since the
   // last unlock), in seconds; 0 if unknown or already due.
   uint32_t earliestLockS() const;
+  // Progress towards the next milestone as 0..1000, or -1 when there is nothing to show:
+  // during warm-up, the warm-up timer; while unlocked, the 5 x tc good seconds the lock test needs.
+  int progressPermille() const;
+  // Seconds left of the warm-up timer; 0 if not warming up.
+  uint32_t warmUpRemainingS() const;
 
   // Trend ring: index 0 is oldest. count() <= kTrendPoints.
   size_t trendCount() const { return trendCount_; }
@@ -88,7 +103,10 @@ private:
 
   ReportTracker nano_;
   NmeaParser nmea_;
+  UtcClock clock_;
   bool gpsSeen_ = false;
+  uint32_t lastHelpMs_ = 0;
+  bool sawHelp_ = false;
   uint32_t gpsdoRestarts_ = 0, gpsRestarts_ = 0, lastRestartMs_ = 0;
   bool nanoHeard_ = false;
   uint32_t lastNanoLineMs_ = 0;

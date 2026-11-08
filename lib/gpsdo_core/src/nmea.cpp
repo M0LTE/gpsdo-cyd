@@ -144,6 +144,18 @@ void NmeaParser::parseGga(const std::string* f, size_t n, uint32_t nowMs) {
   if (toFloat(f[8], x)) fix_.hdop = x;
   fix_.haveAltitude = toFloat(f[9], x);
   if (fix_.haveAltitude) fix_.altitudeM = x;
+  // ddmm.mmmm / dddmm.mmmm
+  auto coord = [](const std::string& v, const std::string& hemi, int degDigits, double& out) {
+    if (v.size() < (size_t)degDigits + 2 || hemi.empty()) return false;
+    char* end = nullptr;
+    double raw = std::strtod(v.c_str(), &end);
+    if (*end != '\0') return false;
+    double deg = (int)(raw / 100);
+    out = deg + (raw - deg * 100) / 60.0;
+    if (hemi == "S" || hemi == "W") out = -out;
+    return true;
+  };
+  fix_.haveLatLon = q > 0 && coord(f[2], f[3], 2, fix_.latDeg) && coord(f[4], f[5], 3, fix_.lonDeg);
   fix_.ggaMs = nowMs;
   fix_.haveGga = true;
 }
@@ -218,6 +230,7 @@ void NmeaParser::parseRmc(const std::string* f, size_t n, uint32_t nowMs) {
   }
   utc_.valid = f[2] == "A";
   utcMs_ = nowMs;
+  ++utcSets_;
 }
 
 void NmeaParser::parseZda(const std::string* f, size_t n, uint32_t nowMs) {
@@ -232,6 +245,7 @@ void NmeaParser::parseZda(const std::string* f, size_t n, uint32_t nowMs) {
   }
   utc_.valid = utc_.dateValid;
   utcMs_ = nowMs;
+  ++utcSets_;
 }
 
 Satellite* NmeaParser::findOrAdd(Constellation sys, uint16_t prn, uint32_t nowMs) {

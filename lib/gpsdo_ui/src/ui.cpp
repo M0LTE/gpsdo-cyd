@@ -1,5 +1,7 @@
 #include "ui.h"
 
+#include "locator.h"
+
 #include <lvgl.h>
 
 #include <algorithm>
@@ -27,7 +29,7 @@ constexpr uint32_t kLime = 0x8CC63F;
 
 constexpr int kW = 320;
 constexpr int kH = 240;
-constexpr int kFooterH = 20;
+constexpr int kFooterH = 22;
 constexpr int kLockCells = 60;
 
 lv_obj_t* O(void* p) { return static_cast<lv_obj_t*>(p); }
@@ -102,12 +104,6 @@ void fmtDuration(char* out, size_t n, uint32_t s) {
   else std::snprintf(out, n, "%um %02us", (unsigned)m, (unsigned)(s % 60));
 }
 
-void fmtAge(char* out, size_t n, const char* name, uint32_t ms) {
-  if (ms == UINT32_MAX) std::snprintf(out, n, "%s --", name);
-  else if (ms < 100000) std::snprintf(out, n, "%s %us", name, (unsigned)(ms / 1000));
-  else std::snprintf(out, n, "%s >99s", name);
-}
-
 const char* sysName(Constellation c) {
   switch (c) {
     case Constellation::Gps: return "GPS";
@@ -142,16 +138,19 @@ void Ui::begin() {
   buildSky();
   buildBars();
   buildTrends();
+  buildTime();
   for (int i = 0; i < kScreens; ++i) {
-    lv_obj_t* f = box(O(screens_[i]), 0, kH - kFooterH, kW, kFooterH, kBg, 0);
-    lv_obj_t* sep = box(f, 0, 0, kW, 1, kLine, 0);
-    (void)sep;
+    // The footer is the "can I trust the 10 MHz right now" strip, the same on every screen.
+    lv_obj_t* f = box(O(screens_[i]), 0, kH - kFooterH, kW, kFooterH, kGrey, 0);
     footer_[i] = f;
-    footerNano_[i] = text(f, &lv_font_montserrat_10, kDim, 8, 5);
-    footerGps_[i] = text(f, &lv_font_montserrat_10, kDim, 70, 5);
-    footerNet_[i] = text(f, &lv_font_montserrat_10, kDim, 128, 5);
-    footerTime_[i] = text(f, &lv_font_montserrat_10, kDim, 196, 5);
-    footerPage_[i] = text(f, &lv_font_montserrat_10, kFaint, 290, 5);
+    footerRef_[i] = text(f, &lv_font_montserrat_14, 0xFFFFFF, 8, 3, "");
+    // Source ages and network state, right-aligned before the page number.
+    footerNano_[i] = text(f, &lv_font_montserrat_10, 0xFFFFFF, 0, 6);
+    lv_obj_set_width(O(footerNano_[i]), 150);
+    lv_obj_set_x(O(footerNano_[i]), 138);
+    lv_obj_set_style_text_align(O(footerNano_[i]), LV_TEXT_ALIGN_RIGHT, 0);
+    footerPage_[i] = text(f, &lv_font_montserrat_10, 0xFFFFFF, 297, 6);
+    for (void* l : {footerNano_[i], footerPage_[i]}) lv_obj_set_style_text_opa(O(l), LV_OPA_80, 0);
   }
   show(kStatus);
 }
@@ -166,12 +165,17 @@ void Ui::show(int screen) {
 void Ui::buildStatus() {
   lv_obj_t* s = newScreen();
   screens_[kStatus] = s;
-  banner_ = box(s, 6, 6, kW - 12, 72, kGrey, 10);
+  banner_ = box(s, 6, 6, kW - 12, 78, kGrey, 10);
   headline_ = text(O(banner_), &lv_font_montserrat_40, 0xFFFFFF, 12, 4, "NO DATA");
   subline_ = text(O(banner_), &lv_font_montserrat_14, 0xFFFFFF, 14, 50, "waiting for the GPSDO");
   lv_obj_set_style_text_opa(O(subline_), LV_OPA_80, 0);
+  // Progress bar along the bottom of the banner: warm-up timer, or good seconds towards lock.
+  progressTrack_ = box(O(banner_), 14, 69, kW - 12 - 28, 4, 0xFFFFFF, 2);
+  lv_obj_set_style_bg_opa(O(progressTrack_), LV_OPA_30, 0);
+  progressFill_ = box(O(progressTrack_), 0, 0, 0, 4, 0xFFFFFF, 2);
+  lv_obj_add_flag(O(progressTrack_), LV_OBJ_FLAG_HIDDEN);
 
-  const int top = 84, w = 151, h = 64, gap = 6;
+  const int top = 90, w = 151, h = 60, gap = 5;
   lv_obj_t* g = tile(s, 6, top, w, h, "GPS");
   gpsMain_ = text(g, &lv_font_montserrat_20, kText, 8, 18, "--");
   gpsSub_ = text(g, &lv_font_montserrat_12, kDim, 8, 44, "");
@@ -215,7 +219,7 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       if (m.gpsdoRestarts() || m.gpsRestarts()) {
         char ago[24];
         fmtDuration(ago, sizeof ago, (nowMs - m.lastRestartMs()) / 1000);
-        std::snprintf(b, sizeof b, "%s %s, restarted %s ago", n.lockedSinceKnown() ? "for" : "for at least", dur, ago);
+        std::snprintf(b, sizeof b, "for %s, restarted %s ago", dur, ago);
       }
       break;
     case Headline::RefSuspect:
@@ -241,11 +245,21 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       break;
     case Headline::Missing10MHz: std::snprintf(b, sizeof b, "the GPSDO sees no 10 MHz from the OCXO"); break;
     case Headline::Holdover: std::snprintf(b, sizeof b, "hold mode set by command"); break;
-    case Headline::WarmUp: std::snprintf(b, sizeof b, "OCXO warming up"); break;
+    case Headline::WarmUp:
+      fmtDuration(dur, sizeof dur, m.warmUpRemainingS());
+      std::snprintf(b, sizeof b, "start-up timer, %s to go, then locking", dur);
+      break;
     default:
       std::snprintf(b, sizeof b, n.haveData() ? "no report from the GPSDO" : "waiting for the GPSDO");
   }
   setText(subline_, b);
+  int pm = m.progressPermille();
+  if (pm < 0 || (h != Headline::WarmUp && h != Headline::Unlocked)) {
+    lv_obj_add_flag(O(progressTrack_), LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_remove_flag(O(progressTrack_), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_width(O(progressFill_), std::max(4, (kW - 12 - 28) * pm / 1000));
+  }
 
   // GPS tile.
   const NmeaParser& g = m.gps();
@@ -563,28 +577,117 @@ void Ui::updateTrends(const Monitor& m) {
   }
 }
 
+// ---------------------------------------------------------------- Time and position
+
+// The clock is drawn one character per fixed cell so the digits don't shuffle as they change.
+static constexpr int kClockY = 34;
+
+void Ui::buildTime() {
+  lv_obj_t* s = newScreen();
+  screens_[kTime] = s;
+  text(s, &lv_font_montserrat_12, kText, 8, 8, "UTC");
+  dateLabel_ = text(s, &lv_font_montserrat_12, kDim, 0, 8, "");
+  lv_obj_align(O(dateLabel_), LV_ALIGN_TOP_RIGHT, -8, 8);
+  // HH:MM:SS at 40 px, .s at 28 px.
+  const int digitW = 27, colonW = 12, smallW = 19, dotW = 9;
+  int widths[kClockChars] = {digitW, digitW, colonW, digitW, digitW, colonW, digitW, digitW, dotW, smallW};
+  int total = 0;
+  for (int w : widths) total += w;
+  int x = (kW - total) / 2;
+  for (int i = 0; i < kClockChars; ++i) {
+    bool small = i >= 8;
+    lv_obj_t* l = text(s, small ? &lv_font_montserrat_28 : &lv_font_montserrat_40, kText, 0,
+                       small ? kClockY + 11 : kClockY, "-");
+    lv_obj_set_width(l, widths[i]);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_x(l, x);
+    x += widths[i];
+    clockChar_[i] = l;
+  }
+  clockSource_ = text(s, &lv_font_montserrat_10, kDim, 0, kClockY + 50, "");
+  lv_obj_set_width(O(clockSource_), kW);
+  lv_obj_set_style_text_align(O(clockSource_), LV_TEXT_ALIGN_CENTER, 0);
+
+  lv_obj_t* t = tile(s, 6, 104, kW - 12, kH - kFooterH - 110, "POSITION");
+  locLabel_ = text(t, &lv_font_montserrat_28, kText, 8, 18, "--------");
+  latLabel_ = text(t, &lv_font_montserrat_16, kText, 170, 20, "");
+  lonLabel_ = text(t, &lv_font_montserrat_16, kText, 170, 42, "");
+  altLabel_ = text(t, &lv_font_montserrat_12, kDim, 8, 60, "");
+}
+
+void Ui::updateTime(const Monitor& m, uint32_t nowMs) {
+  const NmeaParser& g = m.gps();
+  const Fix& f = g.fix();
+  const UtcTime& u = g.utc();
+  char b[64];
+  if (u.dateValid) std::snprintf(b, sizeof b, "%04u-%02u-%02u", u.year, u.month, u.day);
+  else b[0] = 0;
+  setText(dateLabel_, b);
+  bool fresh = m.gpsEverSeen() && nowMs - g.lastGoodMs() <= Monitor::kSilentMs;
+  if (fresh && f.haveLatLon) {
+    setText(locLabel_, maidenhead(f.latDeg, f.lonDeg, 8).c_str());
+    std::snprintf(b, sizeof b, "%.5f %c", std::fabs(f.latDeg), f.latDeg < 0 ? 'S' : 'N');
+    setText(latLabel_, b);
+    std::snprintf(b, sizeof b, "%.5f %c", std::fabs(f.lonDeg), f.lonDeg < 0 ? 'W' : 'E');
+    setText(lonLabel_, b);
+    if (f.haveAltitude) std::snprintf(b, sizeof b, "%.1f m above sea level, %s fix, %u satellites", f.altitudeM,
+                                      f.mode == 3 ? "3D" : "2D", (unsigned)f.satsUsed);
+    else b[0] = 0;
+    setText(altLabel_, b);
+  } else {
+    setText(locLabel_, "--------");
+    setText(latLabel_, "no fix");
+    setText(lonLabel_, "");
+    setText(altLabel_, "");
+  }
+  lastClockMs_ = UINT32_MAX;  // force the clock to redraw
+  fastUpdate(m, nowMs);
+}
+
+void Ui::fastUpdate(const Monitor& m, uint32_t nowMs) {
+  if (current_ != kTime) return;
+  uint32_t t;
+  bool pps;
+  char b[16];
+  if (!m.clock().now(nowMs, t, pps)) {
+    std::snprintf(b, sizeof b, "--:--:--.-");
+    setText(clockSource_, m.gpsEverSeen() ? "waiting for GPS time" : "no GPS data");
+  } else {
+    unsigned ds = (t % 1000) / 100, sec = (t / 1000) % 60, min = (t / 60000) % 60, hr = t / 3600000;
+    if (t / 100 == lastClockMs_) return;
+    lastClockMs_ = t / 100;
+    std::snprintf(b, sizeof b, "%02u:%02u:%02u.%u", hr, min, sec, ds);
+    setText(clockSource_, pps ? "seconds aligned to the GPS pulse" : "from GPS messages only, may lag up to 0.1 s");
+  }
+  for (int i = 0; i < kClockChars; ++i) {
+    char c[2] = {b[i], 0};
+    setText(clockChar_[i], c);
+  }
+}
+
 // ---------------------------------------------------------------- Footer and dispatch
 
 void Ui::updateFooter(int i, const Monitor& m, const UiExtras& x, uint32_t nowMs) {
   char b[40];
-  uint32_t nanoAge = m.msSinceNanoLine(nowMs);
-  fmtAge(b, sizeof b, "GPSDO", nanoAge);
+  uint32_t bg;
+  const char* verdict;
+  if (m.referenceOk()) { bg = kGreen; verdict = "10 MHz OK"; }
+  else if (m.nano().locked() && !m.gpsEverSeen() && !(m.alarms() & (kAlarmNanoSilent | kAlarmNoPps))) {
+    bg = kAmber; verdict = "10 MHz UNCHECKED";  // locked, but no GPS data to confirm it
+  } else { bg = kRed; verdict = "10 MHz UNRELIABLE"; }
+  lv_obj_set_style_bg_color(O(footer_[i]), lv_color_hex(bg), 0);
+  setText(footerRef_[i], verdict);
+  auto age = [](char* out, size_t n, uint32_t ms) {
+    if (ms == UINT32_MAX) std::snprintf(out, n, "--");
+    else if (ms < 100000) std::snprintf(out, n, "%us", (unsigned)(ms / 1000));
+    else std::snprintf(out, n, ">99s");
+  };
+  char na[8], ga[8];
+  age(na, sizeof na, m.msSinceNanoLine(nowMs));
+  age(ga, sizeof ga, m.gpsEverSeen() ? nowMs - m.gps().lastGoodMs() : UINT32_MAX);
+  const char* net = !x.wifiEnabled ? "offline" : !x.wifiConnected ? "no Wi-Fi" : !x.mqttConnected ? "no MQTT" : "MQTT";
+  std::snprintf(b, sizeof b, "GPSDO %s  GPS %s  %s", na, ga, net);
   setText(footerNano_[i], b);
-  setColor(footerNano_[i], nanoAge <= Monitor::kSilentMs ? kDim : kRed);
-  uint32_t gpsAge = m.gpsEverSeen() ? nowMs - m.gps().lastGoodMs() : UINT32_MAX;
-  fmtAge(b, sizeof b, "GPS", gpsAge);
-  setText(footerGps_[i], b);
-  setColor(footerGps_[i], gpsAge <= Monitor::kSilentMs ? kDim : (m.gpsEverSeen() ? kRed : kFaint));
-  if (!x.wifiEnabled) { setText(footerNet_[i], "offline"); setColor(footerNet_[i], kFaint); }
-  else if (!x.wifiConnected) { setText(footerNet_[i], "Wi-Fi down"); setColor(footerNet_[i], kAmber); }
-  else if (!x.mqttConnected) { setText(footerNet_[i], "MQTT down"); setColor(footerNet_[i], kAmber); }
-  else { setText(footerNet_[i], "MQTT ok"); setColor(footerNet_[i], kDim); }
-  const UtcTime& u = m.gps().utc();
-  if (u.valid && m.gpsEverSeen() && nowMs - m.gps().utcMs() < 5000)
-    std::snprintf(b, sizeof b, "%02u:%02u:%02u UTC", u.hour, u.minute, u.second);
-  else
-    std::snprintf(b, sizeof b, "--:--:-- UTC");
-  setText(footerTime_[i], b);
   std::snprintf(b, sizeof b, "%d/%d", i + 1, kScreens);
   setText(footerPage_[i], b);
 }
@@ -595,6 +698,7 @@ void Ui::update(const Monitor& m, const UiExtras& x, uint32_t nowMs) {
     case kSky: updateSky(m, nowMs); break;
     case kBars: updateBars(m, nowMs); break;
     case kTrends: updateTrends(m); break;
+    case kTime: updateTime(m, nowMs); break;
   }
   updateFooter(current_, m, x, nowMs);
 }

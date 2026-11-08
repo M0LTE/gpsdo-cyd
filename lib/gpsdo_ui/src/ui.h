@@ -16,14 +16,16 @@ struct UiExtras {
 
 class Ui {
 public:
-  static constexpr int kScreens = 4;
-  enum Screen { kStatus = 0, kSky = 1, kBars = 2, kTrends = 3 };
+  static constexpr int kScreens = 5;
+  enum Screen { kStatus = 0, kTime = 1, kSky = 2, kBars = 3, kTrends = 4 };
 
   void begin();
   // Refresh the visible screen from the monitor. Call about once a second.
   void update(const Monitor& m, const UiExtras& x, uint32_t nowMs);
   void show(int screen);
   void next() { show((current_ + 1) % kScreens); }
+  // Call often (every ~50 ms) to keep the tenths moving on the time screen; cheap otherwise.
+  void fastUpdate(const Monitor& m, uint32_t nowMs);
   int current() const { return current_; }
 
 private:
@@ -31,6 +33,8 @@ private:
   void buildSky();
   void buildBars();
   void buildTrends();
+  void buildTime();
+  void updateTime(const Monitor& m, uint32_t nowMs);
   void updateStatus(const Monitor& m, uint32_t nowMs);
   void updateSky(const Monitor& m, uint32_t nowMs);
   void updateBars(const Monitor& m, uint32_t nowMs);
@@ -41,10 +45,15 @@ private:
   void* screens_[kScreens] = {};
   void* footer_[kScreens] = {};
   void* footerNano_[kScreens] = {};
-  void* footerGps_[kScreens] = {};
-  void* footerNet_[kScreens] = {};
   void* footerPage_[kScreens] = {};
-  void* footerTime_[kScreens] = {};
+  void* footerRef_[kScreens] = {};
+
+  // Time and position
+  static constexpr int kClockChars = 10;  // HH:MM:SS.s
+  void* clockChar_[kClockChars] = {};
+  void *dateLabel_ = nullptr, *clockSource_ = nullptr;
+  void *locLabel_ = nullptr, *latLabel_ = nullptr, *lonLabel_ = nullptr, *altLabel_ = nullptr;
+  uint32_t lastClockMs_ = UINT32_MAX;
 
   // Status
   void *banner_ = nullptr, *headline_ = nullptr, *subline_ = nullptr;
@@ -52,6 +61,7 @@ private:
   void *ticMain_ = nullptr, *ticSub_ = nullptr;
   void *dacMain_ = nullptr, *dacSub_ = nullptr, *dacMarker_ = nullptr;
   void *tempMain_ = nullptr, *tempSub_ = nullptr;
+  void *progressTrack_ = nullptr, *progressFill_ = nullptr;
 
   // Sky
   static constexpr int kSkyDots = 48;

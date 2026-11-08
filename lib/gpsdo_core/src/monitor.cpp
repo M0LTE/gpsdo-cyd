@@ -18,15 +18,21 @@ const char* headlineText(Headline h) {
   return "?";
 }
 
-void Monitor::onNanoLine(const std::string& line, uint32_t nowMs) {
+void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, uint32_t startMs) {
   ParsedLine p = parseReportLine(line);
   if (p.kind != LineKind::Empty) { nanoHeard_ = true; lastNanoLineMs_ = nowMs; }
-  if (p.kind == LineKind::Banner) { ++gpsdoRestarts_; lastRestartMs_ = nowMs; }
+  // The f1 help text reprints the start-up banner straight after its first line; that's no restart.
+  if (p.kind == LineKind::Other && p.text.rfind("Info and help", 0) == 0) { sawHelp_ = true; lastHelpMs_ = nowMs; }
+  if (p.kind == LineKind::Banner && !(sawHelp_ && nowMs - lastHelpMs_ < 2000)) {
+    ++gpsdoRestarts_;
+    lastRestartMs_ = nowMs;
+  }
   bool wasLocked = nano_.locked();
   nano_.onLine(p, nowMs);
   if (p.kind != LineKind::Data) { tick(nowMs); return; }
   const ReportLine& d = p.data;
   missing10MHz_ = d.missing10MHz;
+  clock_.onSecondMark(startMs - kNanoPrintDelayMs);
   if (d.status != LockStatus::Locked) {
     if (wasLocked || !haveUnlockStart_ || d.time < unlockedSinceNanoTime_) {
       unlockedSinceNanoTime_ = d.time;
@@ -42,7 +48,7 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs) {
   tick(nowMs);
 }
 
-void Monitor::onGpsLine(const std::string& line, uint32_t nowMs) {
+void Monitor::onGpsLine(const std::string& line, uint32_t nowMs, uint32_t burstStartMs) {
   if (line.empty() || line[0] != '$') return;
   // Checked before the checksum: after a power cut the boot text can arrive glued to a sentence
   // that was cut off, so the whole line fails its checksum.
@@ -50,7 +56,13 @@ void Monitor::onGpsLine(const std::string& line, uint32_t nowMs) {
     ++gpsRestarts_;
     lastRestartMs_ = nowMs;
   }
-  if (nmea_.parse(line, nowMs)) gpsSeen_ = true;
+  uint32_t sets = nmea_.utcSetCount();
+  if (!nmea_.parse(line, nowMs)) return;
+  gpsSeen_ = true;
+  if (nmea_.utcSetCount() != sets) {
+    const UtcTime& u = nmea_.utc();
+    clock_.onNmeaTime((uint32_t)u.hour * 3600 + u.minute * 60 + u.second, burstStartMs);
+  }
 }
 
 void Monitor::addTrend(const ReportLine& d) {
@@ -121,6 +133,31 @@ uint32_t Monitor::earliestLockS() const {
   uint32_t need = (uint32_t)d.tc * GpsdoConstants::kLockPpsFactor + 1;
   uint32_t done = d.time - unlockedSinceNanoTime_;
   return done >= need ? 0 : need - done;
+}
+
+}  // namespace gpsdo
+
+namespace gpsdo {
+
+uint32_t Monitor::warmUpRemainingS() const {
+  if (!nano_.haveData() || nano_.last().status != LockStatus::WarmUp) return 0;
+  uint32_t t = nano_.last().time;
+  return t >= (uint32_t)GpsdoConstants::kWarmUpS ? 0 : GpsdoConstants::kWarmUpS - t;
+}
+
+int Monitor::progressPermille() const {
+  if (!nano_.haveData()) return -1;
+  const ReportLine& d = nano_.last();
+  if (d.status == LockStatus::WarmUp) {
+    uint32_t t = d.time > (uint32_t)GpsdoConstants::kWarmUpS ? GpsdoConstants::kWarmUpS : d.time;
+    return (int)(t * 1000 / GpsdoConstants::kWarmUpS);
+  }
+  if (d.status == LockStatus::Unlocked && d.hasDetail && d.tc) {
+    uint32_t need = (uint32_t)d.tc * GpsdoConstants::kLockPpsFactor + 1;
+    uint32_t left = earliestLockS();
+    return (int)((need - (left > need ? need : left)) * 1000 / need);
+  }
+  return -1;
 }
 
 }  // namespace gpsdo
