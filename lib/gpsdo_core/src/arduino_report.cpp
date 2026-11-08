@@ -78,7 +78,9 @@ ParsedLine parseReportLine(const std::string& raw) {
     if (star == std::string::npos || star + 3 != t.size()) { p.kind = LineKind::Other; p.text = t; return p; }
     unsigned cs = 0;
     for (size_t i = 1; i < star; ++i) cs ^= (unsigned char)t[i];
-    unsigned want = (unsigned)std::strtoul(t.substr(star + 1).c_str(), nullptr, 16);
+    auto hex = [](char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; };
+    int hi = hex(t[star + 1]), lo = hex(t[star + 2]);
+    unsigned want = hi < 0 || lo < 0 ? 0x100u : (unsigned)(hi * 16 + lo);
     std::vector<std::string> f;
     size_t a = 1;
     for (;;) {
@@ -127,6 +129,7 @@ ParsedLine parseReportLine(const std::string& raw) {
     if (!toFloat(f[s - 1], x)) continue;
     d.ocxoC = x;
     d.status = st;
+    d.statusField = (uint8_t)s;
     if (f.size() >= s + 7) {
       long a, b, c, e, g;
       float amb;

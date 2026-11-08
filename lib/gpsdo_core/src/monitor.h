@@ -1,6 +1,7 @@
 // Combines the GPSDO report and the GPS NMEA into one picture: lock state, alarms and trends.
 // Pure C++; the caller supplies a millisecond clock.
 #pragma once
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -57,7 +58,8 @@ public:
   static constexpr uint32_t kTrendStepS = 12;       // one stored point per 12 s of reports
   static constexpr size_t kTrendPoints = 150;       // 30 minutes
 
-  // startUs: local microseconds when the line's first byte arrived. For the Nano that marks the
+  // startUs: local microseconds when the line's first byte arrived, or -1 if unknown (read from a
+  // backlog), in which case the line is used for everything except timing. For the Nano that marks the
   // PPS edge (the report starts right after it); for NMEA it pairs the sentence with its second.
   // The short forms take it as nowMs, which is fine for tests and replay.
   void onNanoLine(const std::string& line, uint32_t nowMs, int64_t startUs);
@@ -77,7 +79,13 @@ public:
 
   const ReportTracker& nano() const { return nano_; }
   // Milliseconds since any line at all from the Nano (data, "No PPS", text); UINT32_MAX if none.
-  uint32_t msSinceNanoLine(uint32_t nowMs) const { return nanoHeard_ ? ageMs(nowMs, lastNanoLineMs_) : UINT32_MAX; }
+  uint32_t msSinceNanoLine(uint32_t nowMs) const {
+    if (!nanoHeard_) return UINT32_MAX;
+    return nanoLineStale_ ? std::max<uint32_t>(ageMs(nowMs, lastNanoLineMs_), kSilentMs + 1) : ageMs(nowMs, lastNanoLineMs_);
+  }
+  // Report lines rejected as damaged (layout changed, or the seconds counter jumped): what is left
+  // after a serial buffer overflow can join two half-lines into something that looks valid.
+  uint32_t damagedLines() const { return damagedLines_; }
   const NmeaParser& gps() const { return nmea_; }
   bool gpsEverSeen() const { return gpsSeen_; }
 
@@ -93,7 +101,7 @@ public:
   bool referenceOk() const { return referenceOk_; }
 
   // The latest status line from our modified Nano firmware, if one arrived in the last 3 s.
-  bool haveStatus(uint32_t nowMs) const { return haveStatus_ && ageMs(nowMs, statusMs_) <= kSilentMs; }
+  bool haveStatus(uint32_t nowMs) const { return haveStatus_ && !statusStale_ && ageMs(nowMs, statusMs_) <= kSilentMs; }
   const StatusLine& status() const { return status_; }
   // PPS pulses the Nano has missed since the display started (from the status line).
   uint32_t missedPpsSinceStart() const { return missedSinceStart_; }
@@ -145,7 +153,8 @@ private:
   EventLog events_;
   bool eventsArmed_ = false;
   Headline prevHeadline_ = Headline::NoData;
-  bool prevGpsGood_ = false;
+  bool prevGpsGood_ = false, gpsGoodCandidate_ = false;
+  uint32_t gpsGoodSinceMs_ = 0;
   std::string prevAntenna_;
   uint32_t prevGpsdoRestarts_ = 0, prevGpsRestarts_ = 0;
   int top4_ = -1;
@@ -158,6 +167,15 @@ private:
   bool gpsSeen_ = false;
   uint32_t lastHelpMs_ = 0;
   bool sawHelp_ = false;
+  // Once a source has been silent past kSilentMs it stays stale until new data arrives, so a clock
+  // that wraps round can never make old data look fresh again.
+  bool nanoDataStale_ = false, nanoLineStale_ = false, gpsStale_ = false, statusStale_ = false;
+  // Report line sanity: the layout of the first good line, and a pending line whose time jumped.
+  int layoutStatusField_ = -1;
+  bool layoutDetail_ = false;
+  bool havePending_ = false;
+  uint32_t pendingTime_ = 0, damagedLines_ = 0;
+  bool plausible(const ParsedLine& p);
   uint32_t gpsdoRestarts_ = 0, gpsRestarts_ = 0, lastRestartMs_ = 0;
   bool nanoHeard_ = false;
   uint32_t lastNanoLineMs_ = 0;

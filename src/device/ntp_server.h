@@ -10,6 +10,7 @@ void begin();
 // Called by the main loop with a fresh reading of the clock: at local time localUs it is
 // unixUs. synced says whether that reading may be served as stratum 1.
 void setClock(int64_t localUs, int64_t unixUs, bool synced, uint32_t rootDispersionUs);
+void setUnsynced();  // no usable clock right now: reply with "not synchronised"
 uint32_t requests();
 bool synced();
 }  // namespace NtpServer

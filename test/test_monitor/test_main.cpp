@@ -111,11 +111,11 @@ void test_earliest_lock_estimate() {
   Monitor m;
   m.onNanoLine(nanoLine(100, "Locked"), 0);
   m.onNanoLine(nanoLine(101, "****"), 1000);
-  m.onNanoLine(nanoLine(201, "****"), 2000);
+  for (uint32_t t = 102; t <= 201; ++t) m.onNanoLine(nanoLine(t, "****"), 1000 + (t - 101) * 1000);
   TEST_ASSERT_EQUAL(Headline::Unlocked, m.headline());
   TEST_ASSERT_EQUAL_UINT32(300 * 5 + 1 - 100, m.earliestLockS());
   // TIC strays out of limits: the firmware's counter restarts, so does the estimate.
-  m.onNanoLine(nanoLine(202, "****", 6200), 3000);
+  m.onNanoLine(nanoLine(202, "****", 6200), 102000);
   TEST_ASSERT_EQUAL_UINT32(300 * 5 + 1, m.earliestLockS());
   TEST_ASSERT_FLOAT_WITHIN(0.01f, 120.0f, m.ticErrorNs());
 }
@@ -148,6 +148,59 @@ void test_state_json() {
   TEST_ASSERT_FALSE(Discovery::entity(Discovery::count(), "gpsdo", "x", topic, payload));
 }
 
+static const char* kGsaOk = "$GNGSA,A,3,05,13,15,18,,,,,,,,,1.60,0.95,1.29,1*0A";
+
+void test_long_silence_never_turns_green() {
+  // Review finding: after 24.8 days of silence the age went negative and read as fresh, and after
+  // 49.7 days a 32-bit clock wraps right round. Neither may bring back a green verdict.
+  Monitor m;
+  m.onGpsLine(kGga, 900);
+  m.onGpsLine(kGsaOk, 900);
+  m.onNanoLine(nanoLine(100, "Locked"), 1000);
+  TEST_ASSERT_TRUE(m.referenceOk());
+  // The display keeps ticking every second while both sources are silent.
+  for (uint32_t t = 2000; t < 20000; t += 1000) m.tick(t);
+  TEST_ASSERT_FALSE(m.referenceOk());
+  uint32_t day25 = 25u * 86400000u + 1000u;  // negative as a signed difference
+  m.tick(day25);
+  TEST_ASSERT_FALSE(m.referenceOk());
+  uint32_t wrapped = 1000u + 500u;  // 2^32 ms later: the clock has wrapped to just after the last data
+  m.tick(wrapped);
+  TEST_ASSERT_FALSE(m.referenceOk());
+  TEST_ASSERT_EQUAL(Headline::NoData, m.headline());
+}
+
+void test_spliced_lines_cannot_fake_lock() {
+  // Review finding: after a serial buffer overflow, the start of one line joined to the replay at the
+  // end of a later one can parse as a Locked report. With the layout and the seconds counter
+  // established, both proven examples are rejected. GPS stays fresh throughout, so only the Nano
+  // lines decide the verdict.
+  Monitor m;
+  auto gps = [&](uint32_t ms) { m.onGpsLine(kGga, ms); m.onGpsLine(kGsaOk, ms); };
+  for (uint32_t t = 8700; t < 8710; ++t) {
+    uint32_t ms = (t - 8699) * 1000;
+    gps(ms);
+    m.onNanoLine(nanoLine(t, "****"), ms);
+  }
+  TEST_ASSERT_FALSE(m.referenceOk());
+  gps(10500);
+  m.onNanoLine("8702\t4992\t30228\t43.7\tLocked\t", 10500);
+  TEST_ASSERT_FALSE(m.referenceOk());
+  m.onNanoLine("8753\t21\t3002\t4992\t30228\t43.7\tLocked\t", 10600);
+  TEST_ASSERT_FALSE(m.referenceOk());
+  // A full-layout line whose counter jumps is held until the next one agrees.
+  m.onNanoLine(nanoLine(9000, "Locked"), 10700);
+  TEST_ASSERT_FALSE(m.referenceOk());
+  TEST_ASSERT_EQUAL_UINT32(3, m.damagedLines());
+  gps(11000);
+  m.onNanoLine(nanoLine(8710, "****"), 11000);  // the real next line carries on
+  TEST_ASSERT_FALSE(m.referenceOk());
+  // And a genuine lock still comes through.
+  gps(12000);
+  m.onNanoLine(nanoLine(8711, "Locked"), 12000);
+  TEST_ASSERT_TRUE(m.referenceOk());
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_line_assembler);
@@ -160,5 +213,7 @@ int main() {
   RUN_TEST(test_earliest_lock_estimate);
   RUN_TEST(test_trend_ring);
   RUN_TEST(test_state_json);
+  RUN_TEST(test_long_silence_never_turns_green);
+  RUN_TEST(test_spliced_lines_cannot_fake_lock);
   return UNITY_END();
 }

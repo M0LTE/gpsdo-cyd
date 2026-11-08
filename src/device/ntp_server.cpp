@@ -69,6 +69,12 @@ void setClock(int64_t localUs, int64_t unixUs, bool synced, uint32_t rootDispers
   portEXIT_CRITICAL(&mux);
 }
 
+void setUnsynced() {
+  portENTER_CRITICAL(&mux);
+  isSynced = false;
+  portEXIT_CRITICAL(&mux);
+}
+
 uint32_t requests() { return served; }
 bool synced() { return isSynced; }
 

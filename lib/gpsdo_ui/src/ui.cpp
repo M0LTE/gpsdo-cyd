@@ -1,5 +1,6 @@
 #include "ui.h"
 
+#include "age.h"
 #include "locator.h"
 
 #include <lvgl.h>
@@ -239,7 +240,7 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
                       (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es");
       if (m.gpsdoRestarts() || m.gpsRestarts()) {
         char ago[24];
-        fmtDuration(ago, sizeof ago, (nowMs - m.lastRestartMs()) / 1000);
+        fmtDuration(ago, sizeof ago, ageMs(nowMs, m.lastRestartMs()) / 1000);
         std::snprintf(b, sizeof b, "for %s, restarted %s ago", dur, ago);
       }
       break;
@@ -260,8 +261,8 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       break;
     }
     case Headline::NoPps:
-      if ((m.gpsdoRestarts() || m.gpsRestarts()) && nowMs - m.lastRestartMs() < 3600000UL) {
-        fmtDuration(dur, sizeof dur, (nowMs - m.lastRestartMs()) / 1000);
+      if ((m.gpsdoRestarts() || m.gpsRestarts()) && ageMs(nowMs, m.lastRestartMs()) < 3600000UL) {
+        fmtDuration(dur, sizeof dur, ageMs(nowMs, m.lastRestartMs()) / 1000);
         std::snprintf(b, sizeof b, "restarted %s ago, waiting for GPS", dur);
       } else {
         std::snprintf(b, sizeof b, "no GPS pulse, holding last tune");
@@ -683,7 +684,7 @@ void Ui::updateTime(const Monitor& m, uint32_t nowMs) {
   if (u.dateValid) std::snprintf(b, sizeof b, "%04u-%02u-%02u", u.year, u.month, u.day);
   else b[0] = 0;
   setText(dateLabel_, b);
-  bool fresh = m.gpsEverSeen() && nowMs - g.lastGoodMs() <= Monitor::kSilentMs;
+  bool fresh = m.gpsEverSeen() && ageMs(nowMs, g.lastGoodMs()) <= Monitor::kSilentMs;
   if (fresh && f.haveLatLon) {
     setText(locLabel_, maidenhead(f.latDeg, f.lonDeg, 8).c_str());
     std::snprintf(b, sizeof b, "%.5f %c", std::fabs(f.latDeg), f.latDeg < 0 ? 'S' : 'N');
@@ -1068,7 +1069,7 @@ void Ui::updateFooter(int i, const Monitor& m, const UiExtras& x, uint32_t nowMs
   };
   char na[8], ga[8];
   age(na, sizeof na, m.msSinceNanoLine(nowMs));
-  age(ga, sizeof ga, m.gpsEverSeen() ? nowMs - m.gps().lastGoodMs() : UINT32_MAX);
+  age(ga, sizeof ga, m.gpsEverSeen() ? ageMs(nowMs, m.gps().lastGoodMs()) : UINT32_MAX);
   const char* net = !x.wifiEnabled ? "offline" : !x.wifiConnected ? "no Wi-Fi" : !x.mqttConnected ? "no MQTT" : "MQTT";
   std::snprintf(b, sizeof b, "GPSDO %s  GPS %s  %s", na, ga, net);
   setText(footerNano_[i], b);

@@ -1,5 +1,7 @@
 #include "monitor.h"
 
+#include "age.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -22,7 +24,8 @@ const char* headlineText(Headline h) {
 
 void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startUs) {
   ParsedLine p = parseReportLine(line);
-  if (p.kind != LineKind::Empty) { nanoHeard_ = true; lastNanoLineMs_ = nowMs; }
+  if (p.kind != LineKind::Empty) { nanoHeard_ = true; lastNanoLineMs_ = nowMs; nanoLineStale_ = false; }
+  if (p.kind == LineKind::Data && !plausible(p)) { ++damagedLines_; return; }
   // The f1 help text reprints the start-up banner straight after its first line; that's no restart.
   if (p.kind == LineKind::Other && p.text.rfind("Info and help", 0) == 0) { sawHelp_ = true; lastHelpMs_ = nowMs; }
   if (p.kind == LineKind::Banner && !(sawHelp_ && ageMs(nowMs, lastHelpMs_) < 2000)) {
@@ -43,6 +46,7 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startU
     haveMissedBase_ = true;
     status_ = st;
     haveStatus_ = true;
+    statusStale_ = false;
     statusMs_ = nowMs;
     return;
   }
@@ -50,9 +54,12 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startU
   nano_.onLine(p, nowMs);
   if (p.kind != LineKind::Data) { tick(nowMs); return; }
   const ReportLine& d = p.data;
+  nanoDataStale_ = false;
   missing10MHz_ = d.missing10MHz;
   // Use the report as the second mark unless the PPS itself is wired and live.
-  if (!d.missing10MHz && !(havePps_ && startUs - lastPpsUs_ < 2500000)) clock_.onSecondMark(startUs - kNanoPrintDelayUs);
+  // startUs < 0: the line came out of a backlog, so its arrival time says nothing about the second.
+  if (startUs >= 0 && !d.missing10MHz && !(havePps_ && startUs - lastPpsUs_ < 2500000))
+    clock_.onSecondMark(startUs - kNanoPrintDelayUs);
   if (d.status != LockStatus::Locked) {
     if (wasLocked || !haveUnlockStart_ || d.time < unlockedSinceNanoTime_) {
       unlockedSinceNanoTime_ = d.time;
@@ -80,11 +87,46 @@ void Monitor::onGpsLine(const std::string& line, uint32_t nowMs, int64_t startUs
   uint32_t sets = nmea_.utcSetCount();
   if (!nmea_.parse(line, nowMs)) return;
   gpsSeen_ = true;
-  if (nmea_.utcSetCount() != sets && nmea_.utc().dateValid) {
+  gpsStale_ = false;
+  if (startUs >= 0 && nmea_.utcSetCount() != sets && nmea_.utc().dateValid) {
     const UtcTime& u = nmea_.utc();
     int64_t unixSec = daysFromCivil(u.year, u.month, u.day) * 86400 + u.hour * 3600 + u.minute * 60 + u.second;
     clock_.onNmeaTime(unixSec, startUs);
   }
+}
+
+bool Monitor::plausible(const ParsedLine& p) {
+  const ReportLine& d = p.data;
+  // The rolling replay at the end of a line has 0, 1, 4 or 5 fields; anything else is two lines joined.
+  int tailFields = 0;
+  for (const auto& f : p.tail) if (!f.empty()) ++tailFields;
+  if (tailFields == 2 || tailFields == 3 || tailFields > 5) return false;
+  // The column layout never changes on a running unit.
+  if (layoutStatusField_ < 0) {
+    if (!d.hasDetail) return true;  // accept, but only a full line establishes the layout
+    layoutStatusField_ = d.statusField;
+    layoutDetail_ = true;
+  } else if (d.statusField != layoutStatusField_ || (layoutDetail_ && !d.hasDetail)) {
+    return false;
+  }
+  // The seconds counter goes up by one per report. A small gap (lost lines) or a restart from near
+  // zero is fine; a big jump is held until the next line confirms it.
+  if (nano_.haveData()) {
+    uint32_t prev = nano_.last().time;
+    bool next = d.time > prev && d.time - prev <= 10;
+    bool restart = d.time < prev && d.time < 100;
+    if (!next && !restart) {
+      if (havePending_ && d.time > pendingTime_ && d.time - pendingTime_ <= 10) {
+        havePending_ = false;  // two lines agree: the counter really did move on
+        return true;
+      }
+      havePending_ = true;
+      pendingTime_ = d.time;
+      return false;
+    }
+  }
+  havePending_ = false;
+  return true;
 }
 
 void Monitor::addTrend(const ReportLine& d) {
@@ -126,21 +168,28 @@ void Monitor::tick(uint32_t nowMs) {
   lastNowMs_ = nowMs;
   nmea_.expire(nowMs);
   uint16_t a = 0;
-  bool nanoLive = nano_.msSinceData(nowMs) <= kSilentMs;
+  bool nanoLive = !nanoDataStale_ && nano_.msSinceData(nowMs) <= kSilentMs;
+  if (nano_.haveData() && !nanoLive) nanoDataStale_ = true;
   // "No PPS" lines also prove the Nano is alive; only total silence is "no data".
-  bool nanoHeard = msSinceNanoLine(nowMs) <= kSilentMs;
+  bool nanoHeard = !nanoLineStale_ && msSinceNanoLine(nowMs) <= kSilentMs;
+  if (nanoHeard_ && !nanoHeard) nanoLineStale_ = true;
+  if (haveStatus_ && ageMs(nowMs, statusMs_) > kSilentMs) statusStale_ = true;
   if (!nanoHeard) a |= kAlarmNanoSilent;
   if (nano_.msSinceNoPps(nowMs) <= kSilentMs) a |= kAlarmNoPps;
   if (nanoLive && missing10MHz_) a |= kAlarmMissing10MHz;
   if ((nano_.haveData() && !nano_.locked()) || (a & kAlarmNoPps)) a |= kAlarmUnlocked;
   if (nano_.haveData() && ReportTracker::dacWarning(nano_.last().dac)) a |= kAlarmDacLimit;
 
-  bool gpsLive = gpsSeen_ && ageMs(nowMs, nmea_.lastGoodMs()) <= kSilentMs;
+  bool gpsLive = gpsSeen_ && !gpsStale_ && ageMs(nowMs, nmea_.lastGoodMs()) <= kSilentMs;
+  if (gpsSeen_ && !gpsLive) gpsStale_ = true;
   const Fix& f = nmea_.fix();
   if (!gpsLive) {
     a |= kAlarmGpsSilent;
   } else {
-    bool noFix = (f.haveGga && f.quality == 0) || (f.haveGsa && f.mode < 2) || (!f.haveGga && !f.haveGsa);
+    // Only real fixes count: GPS (1), differential (2), RTK (4, 5). 6 is the receiver guessing
+    // ("estimated", dead reckoning) and 0 is none.
+    bool goodQuality = f.quality == 1 || f.quality == 2 || f.quality == 4 || f.quality == 5;
+    bool noFix = (f.haveGga && !goodQuality) || (f.haveGsa && f.mode < 2) || (!f.haveGga && !f.haveGsa);
     if (noFix) a |= kAlarmGpsNoFix;
     uint8_t used = f.haveGga ? f.satsUsed : (uint8_t)nmea_.satsUsed(nowMs);
     if (used < 4) a |= kAlarmGpsFewSats;
@@ -239,7 +288,10 @@ void Monitor::detectEvents(uint32_t nowMs) {
     logEvent(nowMs, level, eventText(headline_));
     prevHeadline_ = headline_;
   }
-  if (gpsGood != prevGpsGood_) {
+  // GPS good/bad must hold for 10 s before it is logged, so a marginal 3-4 satellite sky cannot
+  // flood the log (and the flash) with flips.
+  if (gpsGood != gpsGoodCandidate_) { gpsGoodCandidate_ = gpsGood; gpsGoodSinceMs_ = nowMs; }
+  if (gpsGood != prevGpsGood_ && ageMs(nowMs, gpsGoodSinceMs_) >= 10000) {
     if (gpsGood) std::snprintf(b, sizeof b, "GPS fix good, %u satellites", (unsigned)nmea_.fix().satsUsed);
     else std::snprintf(b, sizeof b, "GPS fix lost or weak (%u satellites)", (unsigned)nmea_.fix().satsUsed);
     logEvent(nowMs, gpsGood ? 0 : 2, b);

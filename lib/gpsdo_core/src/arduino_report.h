@@ -17,6 +17,7 @@ enum class LockStatus : uint8_t { Unknown, Locked, Unlocked, Hold, WarmUp };
 
 struct ReportLine {
   uint32_t time = 0;        // seconds since the Nano started
+  uint8_t statusField = 0;  // index of the status column (4, or 6 with 3.7.x's duty-cycle column)
   bool missing10MHz = false; // "Missing 10MHz?" printed in place of ns
   int32_t ns = 0;           // TIC reading, ns
   uint16_t dac = 0;

@@ -67,7 +67,7 @@ void Net::begin(const Settings& s) {
   char id[24];
   snprintf(id, sizeof id, "gpsdo_cyd_%02x%02x%02x", mac[3], mac[4], mac[5]);
   deviceId = id;
-  mqtt.setBufferSize(1024);
+  mqtt.setBufferSize(2048);
   mqtt.setKeepAlive(30);
   mqtt.setSocketTimeout(5);
   NtpServer::begin();

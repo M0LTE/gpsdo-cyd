@@ -20,6 +20,7 @@
 #include "backlight.h"
 #include "config.h"
 #include "line_assembler.h"
+#include "age.h"
 #include "monitor.h"
 #include "net.h"
 #include "ntp_server.h"
@@ -66,7 +67,10 @@ void loadEvents() {
   savedChanges = monitor.events().changes();
 }
 void saveEventsIfChanged(uint32_t now) {
-  if (monitor.events().changes() == savedChanges || now - lastSaveMs < 5000) return;
+  if (monitor.events().changes() == savedChanges) return;
+  // Save soon after a serious event, otherwise at most once a minute, to spare the flash.
+  bool serious = monitor.events().count() && monitor.events().newest(0).level == 2;
+  if (ageMs(now, lastSaveMs) < (serious ? 10000u : 60000u)) return;
   lastSaveMs = now;
   savedChanges = monitor.events().changes();
   static uint8_t blob[EventLog::kBlobSize];
@@ -107,6 +111,16 @@ void onNanoRx() {
   portEXIT_CRITICAL(&tsMux);
 }
 
+// A receive buffer overflow loses bytes mid-line; the next complete line may be two half-lines
+// joined together, so it is dropped.
+volatile bool nanoOverflow = false, gpsOverflow = false;
+void onNanoRxError(hardwareSerial_error_t e) {
+  if (e == UART_BUFFER_FULL_ERROR || e == UART_FIFO_OVF_ERROR) nanoOverflow = true;
+}
+void onGpsRxError(hardwareSerial_error_t e) {
+  if (e == UART_BUFFER_FULL_ERROR || e == UART_FIFO_OVF_ERROR) gpsOverflow = true;
+}
+
 void IRAM_ATTR onPpsEdge() {
   int64_t now = esp_timer_get_time();
   if (digitalRead(PPS_PIN)) ppsRiseUs = now;
@@ -124,7 +138,7 @@ int64_t nanoStartUs() {
 // Which PPS edge is the top of the second: the one just before each Nano report (0 to 60 ms
 // earlier), confirmed on 3 reports in a row. 0 = not known, 1 = rising, 2 = falling.
 int ppsEdgeKind = 0, ppsVotes = 0, ppsVoteKind = 0;
-int64_t lastPpsFedUs = 0;
+int64_t lastPpsFedUs = 0, lastPpsSeenUs = 0;
 int64_t delaySum = 0;
 int delayCount = 0;
 uint32_t lastDelayReportMs = 0;
@@ -164,12 +178,22 @@ void pumpUart(HardwareSerial& port, LineAssembler& lines, bool gps) {
     const std::string& l = lines.line();
     Serial.print(gps ? "G> " : "N> ");
     Serial.println(l.c_str());
+    volatile bool& overflow = gps ? gpsOverflow : nanoOverflow;
+    if (overflow || lines.truncated()) {
+      overflow = false;
+      Serial.println("# dropped a line after a receive overflow");
+      if (gps) gpsInLine = false;
+      continue;
+    }
+    // Data read out of a backlog (the loop was held up for a third of a second or more: more than
+    // 300 bytes still waiting at 9600 baud) has no useful arrival time, so it gives no timing.
+    bool backlog = port.available() > 300;
     if (gps) {
-      monitor.onGpsLine(l, now, gpsLineStartUs);
+      monitor.onGpsLine(l, now, backlog ? -1 : gpsLineStartUs);
       gpsInLine = false;
     } else {
-      int64_t start = nanoStartUs();
-      judgePps(start);
+      int64_t start = backlog ? -1 : nanoStartUs();
+      if (start >= 0) judgePps(start);
       monitor.onNanoLine(l, now, start);
     }
   }
@@ -218,10 +242,12 @@ void setup() {
   nanoSerial.begin(NANO_BAUD, SERIAL_8N1, NANO_RX_PIN, -1);
   nanoSerial.setRxFIFOFull(1);
   nanoSerial.onReceive(onNanoRx, false);
+  nanoSerial.onReceiveError(onNanoRxError);
   pinMode(PPS_PIN, INPUT_PULLDOWN);  // quiet when nothing is wired to it
   attachInterrupt(digitalPinToInterrupt(PPS_PIN), onPpsEdge, CHANGE);
   gpsSerial.setRxBufferSize(8192);
   gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, -1);
+  gpsSerial.onReceiveError(onGpsRxError);
 
   touchSpi.begin(TOUCH_CLK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
   touch.begin(touchSpi);
@@ -296,7 +322,23 @@ void loop() {
     portENTER_CRITICAL(&tsMux);
     int64_t e = ppsEdgeKind == 1 ? ppsRiseUs : ppsFallUs;
     portEXIT_CRITICAL(&tsMux);
-    if (e != lastPpsFedUs) { lastPpsFedUs = e; monitor.onPpsEdge(e); }
+    if (e != lastPpsSeenUs) {
+      lastPpsSeenUs = e;
+      // Only a whole number of seconds (+-2 ms) after the last good edge counts; anything else is
+      // noise (the input sits next to a transmitter). Ten seconds without a good edge: forget it.
+      int64_t gap = e - lastPpsFedUs;
+      int64_t off = (gap + 500000) % 1000000 - 500000;
+      if (!lastPpsFedUs || (gap > 500000 && off > -2000 && off < 2000)) {
+        lastPpsFedUs = e;
+        monitor.onPpsEdge(e);
+      }
+    }
+    if (lastPpsFedUs && esp_timer_get_time() - lastPpsFedUs > 10000000) {
+      Serial.println("# PPS input lost, back to the Nano's report for the second mark");
+      ppsEdgeKind = 0;
+      ppsVotes = 0;
+      lastPpsFedUs = 0;
+    }
   }
   if (delayCount >= 60 && now - lastDelayReportMs > 60000) {
     lastDelayReportMs = now;
@@ -310,7 +352,12 @@ void loop() {
   if (monitor.clock().now(nowUs, unixUs, aligned)) {
     bool gpsGood = !(monitor.alarms() & (kAlarmGpsNoFix | kAlarmGpsSilent));
     bool ppsWired = ppsEdgeKind && nowUs - lastPpsFedUs < 2500000;
-    NtpServer::setClock(nowUs, unixUs, aligned && gpsGood, ppsWired ? 200 : 5000);
+    // A freshly started u-blox may be whole seconds out until it has learned the leap-second count
+    // (up to 12.5 minutes), so time is not served as synced for 13 minutes after a GPS restart.
+    bool settled = !monitor.gpsRestarts() || ageMs(now, monitor.lastRestartMs()) > 13UL * 60000;
+    NtpServer::setClock(nowUs, unixUs, aligned && gpsGood && settled, ppsWired ? 200 : 5000);
+  } else {
+    NtpServer::setUnsynced();
   }
   if (now - lastFastMs >= 50) {
     lastFastMs = now;
