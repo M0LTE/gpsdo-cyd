@@ -47,6 +47,7 @@ public:
   void showSetup(const char* apSsid, const char* apPass, const char* url, const char* status, uint32_t secondsLeft);
 
 private:
+  void build(int screen);
   void buildStatus();
   void buildSky();
   void buildBars();

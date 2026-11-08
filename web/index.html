@@ -182,8 +182,19 @@ async function accuracy(){
  if(p!=null)for(const mhz of[3.5,7,10,14,28,50,144])rows.push([`At ${mhz} MHz`,`${(Math.abs(p)*mhz).toFixed(2)} mHz`]);
  kv('acc',rows);
 }
-const every=(fn,ms)=>{const run=()=>fn().catch(()=>{$('strip').className='strip none';$('verdict').textContent='Display not reachable'});run();setInterval(run,ms)};
-every(state,2000);every(events,5000);every(trends,12000);every(history,60000);every(sats,5000);every(accuracy,12000);
+// One request at a time: the display is a small microcontroller, and a burst of parallel requests
+// from a page is what once ran its memory out.
+const tasks=[[state,2000],[events,5000],[sats,5000],[trends,12000],[accuracy,12000],[history,60000]].map(([fn,ms])=>({fn,ms,due:0}));
+async function scheduler(){
+ for(;;){
+  const now=Date.now();
+  const t=tasks.filter(t=>t.due<=now).sort((a,b)=>a.due-b.due)[0];
+  if(!t){await new Promise(r=>setTimeout(r,200));continue}
+  try{await t.fn()}catch(e){$('strip').className='strip none';$('verdict').textContent='Display not reachable'}
+  t.due=Date.now()+t.ms;
+ }
+}
+scheduler();
 </script>
 </body>
 </html>

@@ -4,35 +4,35 @@
 
 namespace gpsdo {
 namespace {
-std::string esc(const char* s) {
-  std::string o = "\"";
+void appendEscaped(std::string& o, const char* s) {
+  o += '"';
   for (; *s; ++s) {
     char c = *s;
     if (c == '"' || c == '\\') { o += '\\'; o += c; }
     else if ((unsigned char)c < 0x20) o += ' ';
     else o += c;
   }
-  return o + "\"";
+  o += '"';
 }
 }  // namespace
 
-std::string eventsJson(const Monitor& m) {
+void eventsJson(const Monitor& m, std::string& s) {
   const EventLog& log = m.events();
-  std::string s = "[";
+  s = "[";
   char b[96];
   for (int i = 0; i < log.count(); ++i) {
     const Event& e = log.newest(i);
     std::snprintf(b, sizeof b, "%s{\"t\":%lld,\"up\":%u,\"level\":%u,\"text\":", i ? "," : "", (long long)e.unixSec,
                   (unsigned)e.upS, (unsigned)e.level);
     s += b;
-    s += esc(e.text);
+    appendEscaped(s, e.text);
     s += "}";
   }
-  return s + "]";
+  s += "]";
 }
 
-std::string trendsJson(const Monitor& m) {
-  std::string s = "{\"step_s\":";
+void trendsJson(const Monitor& m, std::string& s) {
+  s = "{\"step_s\":";
   s += std::to_string(Monitor::kTrendStepS);
   s += ",\"points\":[";
   char b[64];
@@ -45,32 +45,32 @@ std::string trendsJson(const Monitor& m) {
       std::snprintf(b, sizeof b, "%snull", i ? "," : "");
     s += b;
   }
-  return s + "]}";
+  s += "]}";
 }
 
-std::string historyJson(const Monitor& m) {
+void historyJson(const Monitor& m, std::string& s) {
   const NanoHistory& h = m.history();
-  std::string s = "{";
+  s = "{";
   char b[80];
   for (int pass = 0; pass < 2; ++pass) {
     bool five = pass == 0;
     s += five ? "\"five_min\":[" : ",\"three_hour\":[";
-    auto v = h.ordered(five);
-    for (size_t i = 0; i < v.size(); ++i) {
-      const HistoryEntry& e = v[i];
-      std::snprintf(b, sizeof b, "%s[%.1f,%u,%.1f,\"%c\"]", i ? "," : "",
+    bool first = true;
+    h.forEach(five, [&](const HistoryEntry& e) {
+      std::snprintf(b, sizeof b, "%s[%.1f,%u,%.1f,\"%c\"]", first ? "" : ",",
                     e.ticX10 / 10.0 - GpsdoConstants::kTicOffsetNs, (unsigned)e.dac, e.tempC, e.lock);
       s += b;
-    }
+      first = false;
+    });
     s += "]";
   }
   std::snprintf(b, sizeof b, ",\"seen_five_min\":%d,\"seen_three_hour\":%d}", h.seen(true), h.seen(false));
-  return s + b;
+  s += b;
 }
 
-std::string satsJson(const Monitor& m, uint32_t nowMs) {
+void satsJson(const Monitor& m, uint32_t nowMs, std::string& s) {
   const NmeaParser& g = m.gps();
-  std::string s = "[";
+  s = "[";
   char b[120];
   bool first = true;
   for (const auto& sat : g.satellites()) {
@@ -81,11 +81,11 @@ std::string satsJson(const Monitor& m, uint32_t nowMs) {
     s += b;
     first = false;
   }
-  return s + "]";
+  s += "]";
 }
 
-std::string accuracyJson(const Monitor& m) {
-  std::string s = "{";
+void accuracyJson(const Monitor& m, std::string& s) {
+  s = "{";
   const uint32_t w[3] = {60, 300, 1800};
   char b[48];
   for (int i = 0; i < 3; ++i) {
@@ -94,7 +94,7 @@ std::string accuracyJson(const Monitor& m) {
     else std::snprintf(b, sizeof b, "%s\"%u\":null", i ? "," : "", (unsigned)w[i]);
     s += b;
   }
-  return s + "}";
+  s += "}";
 }
 
 }  // namespace gpsdo

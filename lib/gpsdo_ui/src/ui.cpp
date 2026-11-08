@@ -132,43 +132,55 @@ lv_obj_t* tile(lv_obj_t* parent, int x, int y, int w, int h, const char* title) 
 
 }  // namespace
 
-void Ui::begin() {
-  buildStatus();
-  buildSky();
-  buildBars();
-  buildTrends();
-  buildTime();
-  buildNetwork();
-  buildAccuracy();
-  buildHistory();
-  buildEvents();
-  for (int i = 0; i < kScreens; ++i) {
-    // The footer is the "can I trust the 10 MHz right now" strip, the same on every screen.
-    lv_obj_t* f = box(O(screens_[i]), 0, kH - kFooterH, kW, kFooterH, kGrey, 0);
-    footer_[i] = f;
-    footerRef_[i] = text(f, &lv_font_montserrat_14, 0xFFFFFF, 8, 3, "");
-    // Source ages and network state, right-aligned before the page number.
-    footerNano_[i] = text(f, &lv_font_montserrat_10, 0xFFFFFF, 0, 6);
-    lv_obj_set_width(O(footerNano_[i]), 150);
-    lv_obj_set_x(O(footerNano_[i]), 138);
-    lv_obj_set_style_text_align(O(footerNano_[i]), LV_TEXT_ALIGN_RIGHT, 0);
-    footerPage_[i] = text(f, &lv_font_montserrat_10, 0xFFFFFF, 297, 6);
-    for (void* l : {footerNano_[i], footerPage_[i]}) lv_obj_set_style_text_opa(O(l), LV_OPA_80, 0);
+void Ui::begin() { show(kStatus); }
+
+// Only the visible screen exists: building all nine up front took 115 KB of the ESP32's heap,
+// which left too little for Wi-Fi traffic. A screen is built when shown and deleted when left.
+void Ui::build(int i) {
+  switch (i) {
+    case kStatus: buildStatus(); break;
+    case kTime: buildTime(); break;
+    case kAccuracy: buildAccuracy(); break;
+    case kSky: buildSky(); break;
+    case kBars: buildBars(); break;
+    case kTrends: buildTrends(); break;
+    case kHistory: buildHistory(); break;
+    case kEvents: buildEvents(); break;
+    case kNetwork: buildNetwork(); break;
   }
-  show(kStatus);
+  // Fresh screens must redraw everything on their first update.
+  histSig_ = 0;
+  lastClockDs_ = -1;
+  for (bool& h : haveRange_) h = false;
+  // The footer is the "can I trust the 10 MHz right now" strip, the same on every screen.
+  lv_obj_t* f = box(O(screens_[i]), 0, kH - kFooterH, kW, kFooterH, kGrey, 0);
+  footer_[i] = f;
+  footerRef_[i] = text(f, &lv_font_montserrat_14, 0xFFFFFF, 8, 3, "");
+  // Source ages and network state, right-aligned before the page number.
+  footerNano_[i] = text(f, &lv_font_montserrat_10, 0xFFFFFF, 0, 6);
+  lv_obj_set_width(O(footerNano_[i]), 150);
+  lv_obj_set_x(O(footerNano_[i]), 138);
+  lv_obj_set_style_text_align(O(footerNano_[i]), LV_TEXT_ALIGN_RIGHT, 0);
+  footerPage_[i] = text(f, &lv_font_montserrat_10, 0xFFFFFF, 297, 6);
+  for (void* l : {footerNano_[i], footerPage_[i]}) lv_obj_set_style_text_opa(O(l), LV_OPA_80, 0);
 }
 
 void Ui::switchTo(int screen, const Monitor& m, const UiExtras& x, uint32_t nowMs, int64_t nowUs) {
-  current_ = screen;
+  show(screen);
   update(m, x, nowMs);
   fastUpdate(m, nowUs);
-  lv_screen_load(O(screens_[screen]));
   lv_refr_now(nullptr);
 }
 
 void Ui::show(int screen) {
+  int old = current_;
+  if (!screens_[screen]) build(screen);
   current_ = screen;
   lv_screen_load(O(screens_[screen]));
+  if (old != screen && screens_[old]) {
+    lv_obj_delete(O(screens_[old]));  // its child pointers are never used again until rebuilt
+    screens_[old] = nullptr;
+  }
 }
 
 // ---------------------------------------------------------------- Status

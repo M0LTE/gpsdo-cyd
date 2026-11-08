@@ -26,6 +26,17 @@ public:
 
   // Oldest to newest, empty entries skipped. fiveMin: 5-minute series; else 3-hour series.
   std::vector<HistoryEntry> ordered(bool fiveMin) const;
+  // The same order without building a vector: f(const HistoryEntry&) for each valid entry.
+  template <class F>
+  void forEach(bool fiveMin, F f) const {
+    const auto& a = fiveMin ? five_ : three_;
+    int start = fiveMin ? next5_ : next3_;
+    if (start < 0) start = 0;
+    for (int n = 0; n < kSize; ++n) {
+      const HistoryEntry& e = a[(start + n) % kSize];
+      if (e.valid) f(e);
+    }
+  }
   int seen(bool fiveMin) const { return fiveMin ? seen5_ : seen3_; }  // entries received so far
   bool indexKnown(bool fiveMin) const { return fiveMin ? next5_ >= 0 : next3_ >= 0; }
 

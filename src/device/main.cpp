@@ -141,7 +141,7 @@ int ppsEdgeKind = 0, ppsVotes = 0, ppsVoteKind = 0;
 int64_t lastPpsFedUs = 0, lastPpsSeenUs = 0;
 int64_t delaySum = 0;
 int delayCount = 0;
-uint32_t lastDelayReportMs = 0;
+uint32_t lastDelayReportMs = 0, lastHeapLogMs = 0;
 
 void judgePps(int64_t nanoStart) {
   portENTER_CRITICAL(&tsMux);
@@ -205,6 +205,11 @@ void pumpConsole() {
     const std::string& l = consoleLines.line();
     if (l == "setup" && !portal.active()) { portal.begin(settings); continue; }
     if (l == "test watchdog") { Serial.println("# hanging the loop to test the watchdog"); for (;;) delay(1000); }
+    if (l == "heap") {
+      Serial.printf("# heap: free %u, largest block %u, lowest free %u\n", (unsigned)ESP.getFreeHeap(),
+                    (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
+      continue;
+    }
     if (l == "clear events") { monitor.events() = EventLog(); Serial.println("# event log cleared"); continue; }
     if (l.size() < 2 || l[1] != ' ') continue;
     if (l[0] == 'N') monitor.onNanoLine(l.substr(2), millis());
@@ -237,27 +242,30 @@ void setup() {
   Serial.println("# gpsdo-cyd starting");
   Watchdog::begin();
 
-  // Generous buffers: an MQTT reconnect can block the loop for several seconds.
-  nanoSerial.setRxBufferSize(4096);
+  // Modest buffers: lines that pile up while the loop is held up are dropped anyway (no timing,
+  // overflow detection), and heap is precious once Wi-Fi traffic arrives.
+  nanoSerial.setRxBufferSize(1024);
   nanoSerial.begin(NANO_BAUD, SERIAL_8N1, NANO_RX_PIN, -1);
   nanoSerial.setRxFIFOFull(1);
   nanoSerial.onReceive(onNanoRx, false);
   nanoSerial.onReceiveError(onNanoRxError);
   pinMode(PPS_PIN, INPUT_PULLDOWN);  // quiet when nothing is wired to it
   attachInterrupt(digitalPinToInterrupt(PPS_PIN), onPpsEdge, CHANGE);
-  gpsSerial.setRxBufferSize(8192);
+  gpsSerial.setRxBufferSize(2048);
   gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, -1);
   gpsSerial.onReceiveError(onGpsRxError);
 
   touchSpi.begin(TOUCH_CLK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
   touch.begin(touchSpi);
 
+  Serial.printf("# heap before screens %u\n", (unsigned)ESP.getFreeHeap());
   lv_init();
   lv_tick_set_cb(tickCb);
   drawBuf = static_cast<uint8_t*>(heap_caps_malloc(kDrawBufBytes, MALLOC_CAP_DMA));
   lv_display_t* disp = lv_tft_espi_create(TFT_WIDTH, TFT_HEIGHT, drawBuf, kDrawBufBytes);
   lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90);  // matches the PCB silkscreen orientation
   ui.begin();
+  Serial.printf("# heap after screens %u\n", (unsigned)ESP.getFreeHeap());
 
   Backlight::begin();
   Beeper::begin();
@@ -277,7 +285,7 @@ void setup() {
     net.begin(settings);
     Web::begin(monitor);
   }
-  Serial.printf("# ready, free heap %u\n", (unsigned)ESP.getFreeHeap());
+  Serial.printf("# ready, free heap %u, largest block %u\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }
 
 bool resetReasonLogged = false;
@@ -339,6 +347,11 @@ void loop() {
       ppsVotes = 0;
       lastPpsFedUs = 0;
     }
+  }
+  if (ageMs(now, lastHeapLogMs) >= 60000) {
+    lastHeapLogMs = now;
+    Serial.printf("# heap: free %u, largest block %u, lowest free %u\n", (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
   }
   if (delayCount >= 60 && now - lastDelayReportMs > 60000) {
     lastDelayReportMs = now;
