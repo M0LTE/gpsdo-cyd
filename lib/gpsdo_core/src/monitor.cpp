@@ -1,6 +1,8 @@
 #include "monitor.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace gpsdo {
 
@@ -46,6 +48,7 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startU
     haveUnlockStart_ = false;
   }
   addTrend(d);
+  history_.onTail(p.tail);
   tick(nowMs);
 }
 
@@ -141,6 +144,114 @@ void Monitor::tick(uint32_t nowMs) {
   else if (nano_.last().status == LockStatus::Hold) headline_ = Headline::Holdover;
   else if (nano_.last().status == LockStatus::WarmUp) headline_ = Headline::WarmUp;
   else headline_ = Headline::Unlocked;
+
+  // Signal strength of the four strongest satellites in the fix.
+  {
+    int best[4] = {-1, -1, -1, -1};
+    for (const auto& sat : nmea_.satellites()) {
+      if (!sat.valid || !nmea_.isUsed(sat, nowMs) || sat.snr < 0) continue;
+      int v = sat.snr;
+      for (int i = 0; i < 4; ++i)
+        if (v > best[i]) { std::swap(v, best[i]); }
+    }
+    int sum = 0, n = 0;
+    for (int b : best) if (b >= 0) { sum += b; ++n; }
+    top4_ = n == 4 ? sum / 4 : -1;
+    if (top4_ >= 0) { top4Acc_ += top4_; ++top4AccN_; }
+    if (nowMs - top4LastMs_ >= 600000UL) {
+      top4LastMs_ = nowMs;
+      if (top4AccN_) {
+        top4Hist_[top4Head_] = (int8_t)(top4Acc_ / top4AccN_);
+        top4Head_ = (top4Head_ + 1) % top4Hist_.size();
+        if (top4Count_ < top4Hist_.size()) ++top4Count_;
+      }
+      top4Acc_ = 0;
+      top4AccN_ = 0;
+    }
+  }
+  detectEvents(nowMs);
+}
+
+void Monitor::logEvent(uint32_t nowMs, uint8_t level, const char* text) {
+  int64_t u = 0;
+  bool pps;
+  if (clock_.now((int64_t)nowMs * 1000, u, pps)) u /= 1000000;
+  else u = 0;
+  events_.add(u, nowMs / 1000, level, text);
+}
+
+static const char* eventText(Headline h) {
+  switch (h) {
+    case Headline::Locked: return "GPSDO locked";
+    case Headline::Unlocked: return "GPSDO not locked";
+    case Headline::NoPps: return "No PPS from the GPS";
+    case Headline::Missing10MHz: return "No 10 MHz from the oscillator";
+    case Headline::RefSuspect: return "GPS fix lost, GPSDO still says locked";
+    case Headline::NoData: return "GPSDO went silent";
+    case Headline::WarmUp: return "GPSDO warming up after a start";
+    case Headline::Holdover: return "GPSDO in hold mode";
+  }
+  return "?";
+}
+
+void Monitor::detectEvents(uint32_t nowMs) {
+  bool gpsGood = gpsSeen_ && !(alarms_ & (kAlarmGpsSilent | kAlarmGpsNoFix | kAlarmGpsFewSats));
+  const std::string& ant = nmea_.antennaStatus();
+  if (!eventsArmed_) {
+    // Take the first real picture as the baseline rather than logging "changes" from start-up.
+    if (headline_ == Headline::NoData) return;
+    eventsArmed_ = true;
+    prevHeadline_ = headline_;
+    prevGpsGood_ = gpsGood;
+    prevAntenna_ = ant;
+    prevGpsdoRestarts_ = gpsdoRestarts_;
+    prevGpsRestarts_ = gpsRestarts_;
+    char b[48];
+    std::snprintf(b, sizeof b, "Display started: %s", headlineText(headline_));
+    logEvent(nowMs, 1, b);
+    return;
+  }
+  char b[48];
+  if (gpsdoRestarts_ != prevGpsdoRestarts_) { prevGpsdoRestarts_ = gpsdoRestarts_; logEvent(nowMs, 2, "GPSDO restarted (power?)"); }
+  if (gpsRestarts_ != prevGpsRestarts_) { prevGpsRestarts_ = gpsRestarts_; logEvent(nowMs, 2, "GPS module restarted"); }
+  if (headline_ != prevHeadline_) {
+    uint8_t level = headline_ == Headline::Locked ? 0 : (headline_ == Headline::WarmUp || headline_ == Headline::Holdover) ? 1 : 2;
+    logEvent(nowMs, level, eventText(headline_));
+    prevHeadline_ = headline_;
+  }
+  if (gpsGood != prevGpsGood_) {
+    if (gpsGood) std::snprintf(b, sizeof b, "GPS fix good, %u satellites", (unsigned)nmea_.fix().satsUsed);
+    else std::snprintf(b, sizeof b, "GPS fix lost or weak (%u satellites)", (unsigned)nmea_.fix().satsUsed);
+    logEvent(nowMs, gpsGood ? 0 : 2, b);
+    prevGpsGood_ = gpsGood;
+  }
+  if (ant != prevAntenna_ && !ant.empty()) {
+    std::snprintf(b, sizeof b, "GPS antenna: %s", ant.c_str());
+    logEvent(nowMs, ant == "OK" ? 0 : 2, b);
+    prevAntenna_ = ant;
+  }
+}
+
+bool Monitor::frequencyPpb(uint32_t seconds, float& ppb) const {
+  size_t w = seconds / kTrendStepS;
+  if (w == 0 || trendCount_ < w + 1) return false;
+  const TrendPoint& a = trend(trendCount_ - 1 - w);
+  const TrendPoint& b = trend(trendCount_ - 1);
+  if (!a.valid || !b.valid || !a.lockedAll || !b.lockedAll) return false;
+  ppb = (float)(b.ns - a.ns) / (float)(w * kTrendStepS);
+  return true;
+}
+
+bool Monitor::top4Range(int& lo, int& hi) const {
+  if (!top4Count_) return false;
+  lo = 127;
+  hi = -1;
+  for (size_t i = 0; i < top4Count_; ++i) {
+    int v = top4Hist_[(top4Head_ + top4Hist_.size() - 1 - i) % top4Hist_.size()];
+    lo = std::min(lo, v);
+    hi = std::max(hi, v);
+  }
+  return true;
 }
 
 float Monitor::ticErrorNs() const {

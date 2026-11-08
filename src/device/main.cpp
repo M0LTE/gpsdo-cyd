@@ -12,10 +12,12 @@
 //   - "setup" starts the Wi-Fi setup portal.
 #include <Arduino.h>
 #include <SPI.h>
+#include <Preferences.h>
 #include <XPT2046_Touchscreen.h>
 #include <esp_timer.h>
 #include <lvgl.h>
 
+#include "backlight.h"
 #include "config.h"
 #include "line_assembler.h"
 #include "monitor.h"
@@ -49,6 +51,41 @@ bool wasTouched = false;
 uint32_t lastTouchMs = 0;
 uint8_t prevGpsByte = 0;
 uint32_t lastFastMs = 0;
+
+// Event log persistence: saved to flash a few seconds after it changes.
+uint32_t savedChanges = 0, lastSaveMs = 0;
+void loadEvents() {
+  Preferences p;
+  p.begin("gpsdo", true);
+  static uint8_t blob[EventLog::kBlobSize];
+  size_t n = p.getBytes("events", blob, sizeof blob);
+  p.end();
+  if (n == sizeof blob && monitor.events().fromBlob(blob, n)) Serial.printf("# event log restored, %d entries\n", monitor.events().count());
+  savedChanges = monitor.events().changes();
+}
+void saveEventsIfChanged(uint32_t now) {
+  if (monitor.events().changes() == savedChanges || now - lastSaveMs < 5000) return;
+  lastSaveMs = now;
+  savedChanges = monitor.events().changes();
+  static uint8_t blob[EventLog::kBlobSize];
+  monitor.events().toBlob(blob);
+  Preferences p;
+  p.begin("gpsdo", false);
+  p.putBytes("events", blob, sizeof blob);
+  p.end();
+}
+
+// Beep when the 10 MHz verdict changes (not at start-up).
+int lastVerdict = -1;  // 0 unreliable, 1 ok
+void beepOnVerdict() {
+  if (monitor.headline() == Headline::NoData && lastVerdict < 0) return;
+  int v = monitor.referenceOk() ? 1 : 0;
+  if (lastVerdict >= 0 && v != lastVerdict) {
+    if (v) Beeper::good();
+    else Beeper::bad();
+  }
+  lastVerdict = v;
+}
 int64_t gpsLineStartUs = 0;
 bool gpsInLine = false;
 
@@ -191,6 +228,9 @@ void setup() {
   lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90);  // matches the PCB silkscreen orientation
   ui.begin();
 
+  Backlight::begin();
+  Beeper::begin();
+  loadEvents();
   settings.load();
   // Setup portal: when nothing is saved yet, or when the screen is held while the CYD starts.
   bool held = false;
@@ -219,9 +259,13 @@ void loop() {
     pollTouch(now);
     net.loop(monitor, now);
   }
+  Backlight::loop(now);
+  Beeper::loop(now);
   if (now - lastTickMs >= 1000) {
     lastTickMs = now;
     monitor.tick(now);
+    beepOnVerdict();
+    saveEventsIfChanged(now);
     if (portal.active()) {
       ui.showSetup(portal.apSsid().c_str(), portal.apPass().c_str(), "http://192.168.4.1/", portal.status().c_str(),
                    portal.msLeft(now) / 1000);

@@ -122,7 +122,12 @@ bool NmeaParser::parse(const std::string& raw, uint32_t nowMs) {
   else if (type == "GSV") parseGsv(talker, f, n, nowMs);
   else if (type == "RMC") parseRmc(f, n, nowMs);
   else if (type == "ZDA") parseZda(f, n, nowMs);
-  else if (type == "TXT") { if (n > 4) lastTxt_ = f[4]; }
+  else if (type == "TXT") {
+    if (n > 4) {
+      lastTxt_ = f[4];
+      if (lastTxt_.rfind("ANTSTATUS=", 0) == 0) antenna_ = lastTxt_.substr(10);
+    }
+  }
   return true;
 }
 

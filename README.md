@@ -16,13 +16,19 @@ The GPSDO's own "Locked" only means its loop is tracking the GPS pulse. When the
 
 Tap anywhere for the next screen.
 
-1. **Status.** A big coloured banner with the state, then GPS fix and satellites, the TIC reading, the DAC (with its usable range and the red end zones), and temperatures. During start-up and while locking, a bar shows progress.
-2. **Time and position.** UTC to a tenth of a second (the second itself from the GPS messages, its start from the GPSDO's PPS-triggered report), the date, latitude and longitude, altitude and the 8-character Maidenhead locator. The position is only shown, never published.
-3. **Sky.** Where the satellites are. Filled dots are used in the fix, rings are only in view; colour is signal strength.
-4. **Signal.** Signal strength per satellite, strongest first.
-5. **Trends.** The last 30 minutes of TIC, its rate of change, and DAC, with a strip showing when it was locked.
+1. **Status.** A big coloured banner with the state, then GPS satellites and fix, phase against the GPS pulse, oscillator tuning (with its usable range and the red end zones) and oscillator temperature. During start-up and while locking, a bar shows progress.
+2. **Time and position.** UTC to a tenth of a second, the date, latitude and longitude, altitude and the 8-character Maidenhead locator. The position is only shown, never published.
+3. **10 MHz accuracy.** The average frequency error over 1, 5 and 30 minutes in parts per billion, from the change in phase against the GPS pulse, and what the 30-minute figure means in hertz on 3.5 to 144 MHz.
+4. **Sky.** Where the satellites are. Filled dots are used in the fix, rings are only in view; colour is signal strength.
+5. **Signal.** Signal strength per satellite, strongest first, with the antenna status the GPS reports and the average of the best four over 24 hours (a slowly failing antenna or cable shows here first).
+6. **Trends.** The last 30 minutes of phase, phase change per second and oscillator tuning, as 12-second averages, with a strip showing when it was locked.
+7. **History.** 18 days of oscillator tuning and temperature and 12 hours of phase, read from the GPSDO's own memory: the end of each report line replays it, so the whole set arrives within 5 minutes of the display starting.
+8. **Events.** Lock lost and regained, GPS fix lost, no PPS, GPSDO and GPS restarts, antenna faults, Wi-Fi and MQTT drops, with UTC times. Kept across restarts of the display.
+9. **Network.** Wi-Fi, signal and channel, IP address, the NTP server's state, the MQTT broker and the address it was last looked up as, messages sent and the last error.
 
 The bar along the bottom of every screen answers "can I trust the 10 MHz right now?": green **10 MHz OK** (GPSDO locked and the GPS has a good fix), amber **10 MHz UNCHECKED** (locked, but no GPS data to confirm it) or red **10 MHz UNRELIABLE**. It also shows how many seconds since each source last spoke, and the network state.
+
+The backlight dims in a dark room (the CYD's light sensor), and if a small speaker is plugged into the CYD's P4 connector it beeps three times when the 10 MHz becomes unreliable and once when it recovers.
 
 ## What the banner means
 

@@ -73,6 +73,8 @@ public:
   bool sawUbx() const { return sawUbx_; }
   void noteUbx() { sawUbx_ = true; }
   const std::string& lastTxt() const { return lastTxt_; }  // most recent $xxTXT text
+  // Antenna supervisor state from "ANTSTATUS=..." notices (OK, SHORT, OPEN, ...); empty if never seen.
+  const std::string& antennaStatus() const { return antenna_; }
 
   static bool checksumOk(const std::string& s);
 
@@ -92,7 +94,7 @@ private:
   std::array<Satellite, kMaxSats> sats_{};
   uint32_t good_ = 0, badChecksum_ = 0, lastGoodMs_ = 0;
   bool sawUbx_ = false;
-  std::string lastTxt_;
+  std::string lastTxt_, antenna_;
 };
 
 // Constellation from a talker ID ("GP", "GL", ...); GN gives Unknown.

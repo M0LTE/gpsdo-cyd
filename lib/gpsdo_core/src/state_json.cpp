@@ -65,7 +65,14 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
     s += ",\"firmware\":";
     s += quoted(n.revision());
   }
+  float ppb;
+  if (m.frequencyPpb(1800, ppb)) add(s, "freq_error_ppb_30min", "%.4f", ppb);
+  if (m.frequencyPpb(300, ppb)) add(s, "freq_error_ppb_5min", "%.4f", ppb);
   add(s, "gps_seen", "%s", tf(m.gpsEverSeen()));
+  if (!m.gps().antennaStatus().empty()) {
+    s += ",\"antenna\":";
+    s += quoted(m.gps().antennaStatus());
+  }
   if (m.gpsEverSeen()) {
     const NmeaParser& g = m.gps();
     const Fix& f = g.fix();
@@ -116,6 +123,8 @@ const Entity kEntities[] = {
     {"sensor", "locked_s", "Time locked", "{{ value_json.locked_s }}", ",\"device_class\":\"duration\",\"unit_of_measurement\":\"s\""},
     {"sensor", "lock_losses", "Lock losses", "{{ value_json.lock_losses }}", ",\"state_class\":\"total_increasing\""},
     {"sensor", "sats_used", "Satellites used", "{{ value_json.sats_used }}", ",\"state_class\":\"measurement\""},
+    {"sensor", "freq_error_ppb_30min", "Frequency error (30 min)", "{{ value_json.freq_error_ppb_30min }}", ",\"unit_of_measurement\":\"ppb\",\"state_class\":\"measurement\""},
+    {"sensor", "antenna", "GPS antenna", "{{ value_json.antenna }}", ""},
     {"sensor", "gpsdo_restarts", "GPSDO restarts", "{{ value_json.gpsdo_restarts }}", ",\"state_class\":\"total_increasing\""},
     {"sensor", "gps_restarts", "GPS restarts", "{{ value_json.gps_restarts }}", ",\"state_class\":\"total_increasing\""},
 };

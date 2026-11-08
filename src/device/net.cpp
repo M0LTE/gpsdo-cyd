@@ -68,14 +68,21 @@ void Net::begin(const Settings& s) {
   NtpServer::begin();
 }
 
-void Net::loop(const Monitor& m, uint32_t nowMs) {
+void Net::loop(Monitor& m, uint32_t nowMs) {
   if (!enabled) return;
-  if (WiFi.status() != WL_CONNECTED) { txPowerSet = false; return; }
+  if (WiFi.status() != WL_CONNECTED) {
+    if (txPowerSet) m.logEvent(nowMs, 1, "Wi-Fi connection lost");
+    txPowerSet = false;
+    return;
+  }
   if (!txPowerSet) {
     WiFi.setTxPower(WIFI_TX_POWER);
     txPowerSet = true;
     Serial.printf("# Wi-Fi: joined %s as %s, signal %d dBm\n", cfg.wifiSsid.c_str(), WiFi.localIP().toString().c_str(),
                   WiFi.RSSI());
+    char e[48];
+    snprintf(e, sizeof e, "Wi-Fi joined, %d dBm, ch %d", (int)WiFi.RSSI(), (int)WiFi.channel());
+    m.logEvent(nowMs, 0, e);
   }
   if (!mqtt.connected()) {
     if (connectedAtMs && wasConnected) {
@@ -84,6 +91,7 @@ void Net::loop(const Monitor& m, uint32_t nowMs) {
       char e[48];
       snprintf(e, sizeof e, "MQTT connection lost, state %d", mqtt.state());
       lastError = e;
+      m.logEvent(nowMs, 1, e);
       lastErrorMs = nowMs;
     }
     if (nowMs - lastAttemptMs < retryMs) return;

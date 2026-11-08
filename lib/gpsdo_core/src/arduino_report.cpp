@@ -105,6 +105,9 @@ ParsedLine parseReportLine(const std::string& raw) {
         d.ambientC = amb;
       }
     }
+    // Everything after the detail columns is the rolling history replay.
+    if (d.hasDetail)
+      for (size_t k = s + 7; k < f.size(); ++k) p.tail.push_back(trim(f[k]));
     // The startup revision is also repeated in the rolling tail every 300 s.
     for (size_t k = s + 1; k < f.size(); ++k) {
       std::string tf = trim(f[k]);

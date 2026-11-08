@@ -6,6 +6,8 @@
 #include <string>
 
 #include "arduino_report.h"
+#include "event_log.h"
+#include "history.h"
 #include "nmea.h"
 #include "utc_clock.h"
 
@@ -101,6 +103,20 @@ public:
   // Seconds left of the warm-up timer; 0 if not warming up.
   uint32_t warmUpRemainingS() const;
 
+  const NanoHistory& history() const { return history_; }
+  EventLog& events() { return events_; }
+  const EventLog& events() const { return events_; }
+  // Add an event stamped with the current UTC if known (used by the firmware for network events).
+  void logEvent(uint32_t nowMs, uint8_t level, const char* text);
+
+  // Average frequency error of the 10 MHz over the last `seconds` (a multiple of 12), in parts per
+  // billion, from the change in average phase vs the GPS pulse. False until that much is stored.
+  bool frequencyPpb(uint32_t seconds, float& ppb) const;
+
+  // Mean signal strength of the four strongest satellites in the fix, now and over 24 hours.
+  int top4Snr() const { return top4_; }
+  bool top4Range(int& lo, int& hi) const;
+
   // Trend ring: index 0 is oldest. count() <= kTrendPoints.
   size_t trendCount() const { return trendCount_; }
   const TrendPoint& trend(size_t i) const {
@@ -109,11 +125,25 @@ public:
 
 private:
   void addTrend(const ReportLine& d);
+  void detectEvents(uint32_t nowMs);
 
   ReportTracker nano_;
   NmeaParser nmea_;
   UtcClock clock_;
   int64_t lastPpsUs_ = 0;
+  NanoHistory history_;
+  EventLog events_;
+  bool eventsArmed_ = false;
+  Headline prevHeadline_ = Headline::NoData;
+  bool prevGpsGood_ = false;
+  std::string prevAntenna_;
+  uint32_t prevGpsdoRestarts_ = 0, prevGpsRestarts_ = 0;
+  int top4_ = -1;
+  std::array<int8_t, 144> top4Hist_{};  // one point per 10 minutes, 24 hours
+  size_t top4Head_ = 0, top4Count_ = 0;
+  int32_t top4Acc_ = 0;
+  uint16_t top4AccN_ = 0;
+  uint32_t top4LastMs_ = 0;
   bool havePps_ = false;
   bool gpsSeen_ = false;
   uint32_t lastHelpMs_ = 0;

@@ -27,8 +27,9 @@ struct UiExtras {
 
 class Ui {
 public:
-  static constexpr int kScreens = 6;
-  enum Screen { kStatus = 0, kTime = 1, kSky = 2, kBars = 3, kTrends = 4, kNetwork = 5 };
+  static constexpr int kScreens = 9;
+  enum Screen { kStatus = 0, kTime = 1, kAccuracy = 2, kSky = 3, kBars = 4, kTrends = 5, kHistory = 6, kEvents = 7,
+                kNetwork = 8 };
 
   void begin();
   // Refresh the visible screen from the monitor. Call about once a second.
@@ -53,6 +54,12 @@ private:
   void buildTime();
   void updateTime(const Monitor& m, uint32_t nowMs);
   void buildNetwork();
+  void buildAccuracy();
+  void updateAccuracy(const Monitor& m);
+  void buildHistory();
+  void updateHistory(const Monitor& m);
+  void buildEvents();
+  void updateEvents(const Monitor& m);
   void updateNetwork(const UiExtras& x);
   void updateStatus(const Monitor& m, uint32_t nowMs);
   void updateSky(const Monitor& m, uint32_t nowMs);
@@ -70,6 +77,26 @@ private:
   void* netKey_[kNetRows] = {};
   void* netVal_[kNetRows] = {};
   void* netTitle_ = nullptr;
+  // Accuracy
+  void *accBig_ = nullptr, *accBigNote_ = nullptr;
+  void* accRow_[3] = {};
+  void* accBand_[6] = {};
+  void* accNote_ = nullptr;
+  // History
+  void* histChart_[3] = {};
+  void* histSeries_[3] = {};
+  void* histRange_[3] = {};
+  void* histStrip_ = nullptr;
+  void* histNote_ = nullptr;
+  uint32_t histSig_ = 0;
+  // Events
+  static constexpr int kEventRows = 9;
+  void* evWhen_[kEventRows] = {};
+  void* evText_[kEventRows] = {};
+  void* evDot_[kEventRows] = {};
+  void* evEmpty_ = nullptr;
+  // Signal screen extra line
+  void* barsAntenna_ = nullptr;
   void *setup_ = nullptr, *setupNet_ = nullptr, *setupPass_ = nullptr, *setupUrl_ = nullptr, *setupStatus_ = nullptr,
        *setupLeft_ = nullptr;
 

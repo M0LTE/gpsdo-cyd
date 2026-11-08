@@ -138,6 +138,9 @@ void Ui::begin() {
   buildTrends();
   buildTime();
   buildNetwork();
+  buildAccuracy();
+  buildHistory();
+  buildEvents();
   for (int i = 0; i < kScreens; ++i) {
     // The footer is the "can I trust the 10 MHz right now" strip, the same on every screen.
     lv_obj_t* f = box(O(screens_[i]), 0, kH - kFooterH, kW, kFooterH, kGrey, 0);
@@ -428,7 +431,8 @@ void Ui::buildBars() {
   lv_obj_t* s = newScreen();
   screens_[kBars] = s;
   text(s, &lv_font_montserrat_12, kText, 8, 8, "SIGNAL");
-  barsTitle_ = text(s, &lv_font_montserrat_10, kDim, 70, 10, "");
+  barsTitle_ = text(s, &lv_font_montserrat_10, kDim, 70, 4, "");
+  barsAntenna_ = text(s, &lv_font_montserrat_10, kDim, 70, 17, "");
   for (int db : {20, 30, 40, 50}) {
     int y = kBarBottom - (kBarBottom - kBarTop) * db / kBarMaxSnr;
     box(s, 26, y, kW - 34, 1, kLine, 0);
@@ -458,8 +462,20 @@ void Ui::updateBars(const Monitor& m, uint32_t nowMs) {
     return ua > ub;
   });
   char b[48];
-  std::snprintf(b, sizeof b, "%u in view, %u in fix, strongest first", (unsigned)v.size(), (unsigned)g.satsUsed(nowMs));
+  std::snprintf(b, sizeof b, "%u in view, %u in the fix, strongest first", (unsigned)v.size(), (unsigned)g.satsUsed(nowMs));
   setText(barsTitle_, v.empty() ? "" : b);
+  {
+    char a[96];
+    const std::string& ant = m.gps().antennaStatus();
+    int lo, hi;
+    size_t n = 0;
+    a[0] = 0;
+    if (!ant.empty()) n += std::snprintf(a + n, sizeof a - n, "antenna %s", ant.c_str());
+    if (m.top4Snr() >= 0) n += std::snprintf(a + n, sizeof a - n, "%sbest 4 average %d dB-Hz", n ? ", " : "", m.top4Snr());
+    if (m.top4Range(lo, hi)) std::snprintf(a + n, sizeof a - n, " (24 h: %d to %d)", lo, hi);
+    setText(barsAntenna_, a);
+    setColor(barsAntenna_, (!ant.empty() && ant != "OK") ? kRed : kDim);
+  }
   for (int i = 0; i < kBarCount; ++i) {
     if (i >= (int)v.size()) {
       lv_obj_add_flag(O(bar_[i]), LV_OBJ_FLAG_HIDDEN);
@@ -774,6 +790,227 @@ void Ui::updateNetwork(const UiExtras& x) {
   }
 }
 
+
+// ---------------------------------------------------------------- Accuracy
+
+static const struct { const char* name; float mhz; } kBands[6] = {
+    {"3.5 MHz", 3.5f}, {"7 MHz", 7.0f}, {"14 MHz", 14.0f}, {"28 MHz", 28.0f}, {"50 MHz", 50.0f}, {"144 MHz", 144.0f}};
+
+void Ui::buildAccuracy() {
+  lv_obj_t* s = newScreen();
+  screens_[kAccuracy] = s;
+  text(s, &lv_font_montserrat_12, kText, 8, 8, "10 MHz ACCURACY");
+  text(s, &lv_font_montserrat_10, kFaint, 140, 10, "measured against the GPS pulse");
+  accBig_ = text(s, &lv_font_montserrat_28, kText, 8, 28, "--");
+  accBigNote_ = text(s, &lv_font_montserrat_10, kDim, 8, 62, "");
+  for (int i = 0; i < 3; ++i) accRow_[i] = text(s, &lv_font_montserrat_12, kText, 8, 82 + i * 17, "");
+  lv_obj_t* t = tile(s, 6, 136, kW - 12, kH - kFooterH - 140, "WHAT THAT MEANS ON AIR (30-MINUTE FIGURE)");
+  for (int i = 0; i < 6; ++i) {
+    accBand_[i] = text(t, &lv_font_montserrat_12, kText, 8 + (i % 3) * 100, 20 + (i / 3) * 18, "");
+  }
+  accNote_ = text(s, &lv_font_montserrat_10, kFaint, 8, 0, "");
+  lv_obj_add_flag(O(accNote_), LV_OBJ_FLAG_HIDDEN);
+}
+
+static void fmtHz(char* out, size_t n, double hz) {
+  double a = std::fabs(hz);
+  if (a < 1e-3) std::snprintf(out, n, "%.0f uHz", a * 1e6);
+  else if (a < 1.0) std::snprintf(out, n, "%.1f mHz", a * 1e3);
+  else std::snprintf(out, n, "%.2f Hz", a);
+}
+
+void Ui::updateAccuracy(const Monitor& m) {
+  char b[64];
+  float ppb[3];
+  bool have[3];
+  const uint32_t win[3] = {60, 300, 1800};
+  const char* names[3] = {"1 minute", "5 minutes", "30 minutes"};
+  for (int i = 0; i < 3; ++i) have[i] = m.frequencyPpb(win[i], ppb[i]);
+  int best = have[2] ? 2 : have[1] ? 1 : have[0] ? 0 : -1;
+  if (best < 0) {
+    setText(accBig_, "--");
+    setText(accBigNote_, m.nano().locked() ? "needs a minute of locked data" : "only measured while locked");
+  } else {
+    char hz[24];
+    fmtHz(hz, sizeof hz, ppb[best] * 1e-9 * 10e6);
+    std::snprintf(b, sizeof b, "%+.3f ppb", ppb[best]);
+    setText(accBig_, b);
+    std::snprintf(b, sizeof b, "average over %s, so 10 MHz is off by %s", names[best], hz);
+    setText(accBigNote_, b);
+  }
+  for (int i = 0; i < 3; ++i) {
+    if (have[i]) std::snprintf(b, sizeof b, "over %s: %+.3f ppb", names[i], ppb[i]);
+    else std::snprintf(b, sizeof b, "over %s: not enough locked data yet", names[i]);
+    setText(accRow_[i], b);
+    setColor(accRow_[i], have[i] ? kText : kFaint);
+  }
+  for (int i = 0; i < 6; ++i) {
+    if (have[2]) {
+      char hz[24];
+      fmtHz(hz, sizeof hz, ppb[2] * 1e-9 * kBands[i].mhz * 1e6);
+      std::snprintf(b, sizeof b, "%s %s", kBands[i].name, hz);
+    } else {
+      std::snprintf(b, sizeof b, "%s --", kBands[i].name);
+    }
+    setText(accBand_[i], b);
+  }
+}
+
+// ---------------------------------------------------------------- History (the GPSDO's own memory)
+
+static constexpr int kHistPoints = NanoHistory::kSize;
+static uint8_t histStripBuf[LV_CANVAS_BUF_SIZE(kHistPoints * 2, 8, 16, LV_DRAW_BUF_STRIDE_ALIGN)];
+
+void Ui::buildHistory() {
+  lv_obj_t* s = newScreen();
+  screens_[kHistory] = s;
+  const char* titles[3] = {"Oscillator tuning (DAC), 18 days", "Oscillator temperature C, 18 days",
+                           "Phase vs target ns, 12 hours"};
+  const uint32_t colors[3] = {kGreen, kAmber, kBlue};
+  for (int i = 0; i < 3; ++i) {
+    int y = 4 + i * 60;
+    lv_obj_t* c = lv_chart_create(s);
+    lv_obj_set_pos(c, 6, y);
+    lv_obj_set_size(c, kW - 12, 56);
+    lv_obj_set_style_bg_color(c, lv_color_hex(kPanel), 0);
+    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(c, 0, 0);
+    lv_obj_set_style_radius(c, 8, 0);
+    lv_obj_set_style_pad_all(c, 4, 0);
+    lv_obj_set_style_pad_top(c, 16, 0);
+    lv_obj_set_style_line_color(c, lv_color_hex(kLine), LV_PART_MAIN);
+    lv_obj_set_style_line_width(c, 2, LV_PART_ITEMS);
+    lv_obj_set_style_size(c, 0, 0, LV_PART_INDICATOR);
+    lv_chart_set_div_line_count(c, 3, 0);
+    lv_chart_set_type(c, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(c, kHistPoints);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    histSeries_[i] = lv_chart_add_series(c, lv_color_hex(colors[i]), LV_CHART_AXIS_PRIMARY_Y);
+    lv_chart_set_all_value(c, S(histSeries_[i]), LV_CHART_POINT_NONE);
+    histChart_[i] = c;
+    text(c, &lv_font_montserrat_10, kDim, 0, -14, titles[i]);
+    histRange_[i] = text(c, &lv_font_montserrat_10, kFaint, 0, -14, "");
+    lv_obj_set_width(O(histRange_[i]), kW - 20);
+    lv_obj_set_style_text_align(O(histRange_[i]), LV_TEXT_ALIGN_RIGHT, 0);
+  }
+  int sy = 4 + 3 * 60;
+  lv_obj_t* cv = lv_canvas_create(s);
+  lv_canvas_set_buffer(cv, histStripBuf, kHistPoints * 2, 8, LV_COLOR_FORMAT_RGB565);
+  lv_canvas_fill_bg(cv, lv_color_hex(kBg), LV_OPA_COVER);
+  lv_obj_set_pos(cv, kW - 6 - kHistPoints * 2, sy + 2);
+  histStrip_ = cv;
+  histNote_ = text(s, &lv_font_montserrat_10, kDim, 8, sy + 12, "");
+}
+
+void Ui::updateHistory(const Monitor& m) {
+  const NanoHistory& h = m.history();
+  // Redraw only when something new has arrived (the whole set refreshes every 5 minutes).
+  uint32_t sig = (uint32_t)h.seen(true) * 1000 + (uint32_t)h.seen(false) + (uint32_t)m.nano().last().time / 300 * 7;
+  if (sig == histSig_) return;
+  histSig_ = sig;
+  auto three = h.ordered(false);
+  auto five = h.ordered(true);
+  for (int k = 0; k < 3; ++k) {
+    const auto& src = k < 2 ? three : five;
+    lv_obj_t* c = O(histChart_[k]);
+    lv_chart_series_t* ser = S(histSeries_[k]);
+    int32_t lo = INT32_MAX, hi = INT32_MIN;
+    for (int p = 0; p < kHistPoints; ++p) {
+      long idx = (long)p - (kHistPoints - (long)src.size());
+      int32_t v = LV_CHART_POINT_NONE;
+      if (idx >= 0) {
+        const HistoryEntry& e = src[(size_t)idx];
+        v = k == 0 ? e.dac : k == 1 ? (int32_t)std::lround(e.tempC * 10) : (e.ticX10 - GpsdoConstants::kTicOffsetNs * 10);
+        lo = std::min(lo, v);
+        hi = std::max(hi, v);
+      }
+      lv_chart_set_value_by_id(c, ser, p, v);
+    }
+    char b[48];
+    if (lo == INT32_MAX) {
+      lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, 0, 1);
+      std::snprintf(b, sizeof b, "collecting...");
+    } else {
+      int32_t rlo = 0, rhi = 0;
+      niceRange(lo, hi, rlo, rhi, false);
+      lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, rlo, rhi);
+      if (k == 0) std::snprintf(b, sizeof b, "%ld to %ld", (long)lo, (long)hi);
+      else if (k == 1) std::snprintf(b, sizeof b, "%.1f to %.1f", lo / 10.0, hi / 10.0);
+      else std::snprintf(b, sizeof b, "%.0f to %.0f", lo / 10.0, hi / 10.0);
+    }
+    setText(histRange_[k], b);
+    lv_chart_refresh(c);
+  }
+  lv_obj_t* cv = O(histStrip_);
+  for (int p = 0; p < kHistPoints; ++p) {
+    long idx = (long)p - (kHistPoints - (long)three.size());
+    uint32_t col = kBg;
+    if (idx >= 0) {
+      char l = three[(size_t)idx].lock;
+      col = l == 'L' ? kGreen : l == 'U' ? kRed : l == ' ' ? kGrey : kAmber;
+    }
+    for (int x = 0; x < 2; ++x)
+      for (int y = 0; y < 8; ++y) lv_canvas_set_px(cv, p * 2 + x, y, lv_color_hex(col), LV_OPA_COVER);
+  }
+  lv_obj_invalidate(cv);
+  char b[96];
+  std::snprintf(b, sizeof b, "Locked all 3 h: green yes, red no. From the GPSDO (%d/144)", h.seen(false));
+  setText(histNote_, b);
+}
+
+// ---------------------------------------------------------------- Events
+
+void Ui::buildEvents() {
+  lv_obj_t* s = newScreen();
+  screens_[kEvents] = s;
+  text(s, &lv_font_montserrat_12, kText, 8, 8, "EVENTS");
+  text(s, &lv_font_montserrat_10, kFaint, 70, 10, "newest first, UTC, kept across restarts");
+  for (int i = 0; i < kEventRows; ++i) {
+    int y = 28 + i * 20;
+    evDot_[i] = box(s, 8, y + 4, 8, 8, kGrey, 4);
+    evWhen_[i] = text(s, &lv_font_montserrat_10, kDim, 22, y + 1, "");
+    evText_[i] = text(s, &lv_font_montserrat_12, kText, 100, y, "");
+    lv_obj_set_size(O(evText_[i]), kW - 106, 16);
+    lv_label_set_long_mode(O(evText_[i]), LV_LABEL_LONG_DOT);
+  }
+  evEmpty_ = text(s, &lv_font_montserrat_12, kFaint, 8, 40, "nothing yet");
+}
+
+void Ui::updateEvents(const Monitor& m) {
+  const EventLog& log = m.events();
+  static const char* kMon[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  for (int i = 0; i < kEventRows; ++i) {
+    bool have = i < log.count();
+    if (!have) {
+      lv_obj_add_flag(O(evDot_[i]), LV_OBJ_FLAG_HIDDEN);
+      setText(evWhen_[i], "");
+      setText(evText_[i], "");
+      continue;
+    }
+    const Event& e = log.newest(i);
+    char w[24];
+    if (e.unixSec > 0) {
+      int64_t days = e.unixSec / 86400, sod = e.unixSec % 86400;
+      // civil from days (Howard Hinnant)
+      int64_t z = days + 719468, era = (z >= 0 ? z : z - 146096) / 146097;
+      unsigned doe = (unsigned)(z - era * 146097);
+      unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+      unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+      unsigned mp = (5 * doy + 2) / 153, d = doy - (153 * mp + 2) / 5 + 1, mo = mp < 10 ? mp + 3 : mp - 9;
+      std::snprintf(w, sizeof w, "%u %s %02u:%02u", d, kMon[mo - 1], (unsigned)(sod / 3600), (unsigned)(sod / 60 % 60));
+    } else {
+      std::snprintf(w, sizeof w, "time unknown");
+    }
+    setText(evWhen_[i], w);
+    setText(evText_[i], e.text);
+    lv_obj_remove_flag(O(evDot_[i]), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_color(O(evDot_[i]), lv_color_hex(e.level == 0 ? kGreen : e.level == 1 ? kAmber : kRed), 0);
+  }
+  if (log.count()) lv_obj_add_flag(O(evEmpty_), LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_remove_flag(O(evEmpty_), LV_OBJ_FLAG_HIDDEN);
+}
+
 // ---------------------------------------------------------------- Wi-Fi setup
 
 void Ui::showSetup(const char* apSsid, const char* apPass, const char* url, const char* status, uint32_t secondsLeft) {
@@ -838,6 +1075,9 @@ void Ui::update(const Monitor& m, const UiExtras& x, uint32_t nowMs) {
     case kTrends: updateTrends(m); break;
     case kTime: updateTime(m, nowMs); break;
     case kNetwork: updateNetwork(x); break;
+    case kAccuracy: updateAccuracy(m); break;
+    case kHistory: updateHistory(m); break;
+    case kEvents: updateEvents(m); break;
   }
   updateFooter(current_, m, x, nowMs);
 }

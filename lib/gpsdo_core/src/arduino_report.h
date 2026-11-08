@@ -9,6 +9,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace gpsdo {
 
@@ -44,6 +45,7 @@ struct ParsedLine {
   LineKind kind = LineKind::Empty;
   ReportLine data;          // valid when kind == Data
   std::string text;         // Revision/Data: revision string if present; Other: the trimmed line
+  std::vector<std::string> tail;  // Data: the fields after the per-second values (rolling history replay)
 };
 
 // Parse one line (without its line ending; a trailing '\r' is tolerated).
