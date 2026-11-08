@@ -1,0 +1,1 @@
+{ "name": "gpsdo_core", "version": "0.1.0", "description": "Pure C++ parsers for the GPSDO report and NMEA, no Arduino dependencies", "frameworks": "*", "platforms": "*" }
