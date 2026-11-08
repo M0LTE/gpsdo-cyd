@@ -221,10 +221,13 @@ void Portal::step(uint32_t nowMs) {
   }
 }
 
-bool Portal::loop(uint32_t nowMs) {
+bool Portal::loop(uint32_t) {
   if (!active_) return false;
   dns.processNextRequest();
   server.handleClient();
+  // Read the clock after handling requests: a submit sets testStartMs_ from millis(), and an
+  // older timestamp would make "now - start" wrap round and fail the test at once.
+  uint32_t nowMs = millis();
   step(nowMs);
   if (test_ == Test::Saved && nowMs - savedMs_ > 4000) ESP.restart();
   if (msLeft(nowMs) == 0 && test_ != Test::Saved) {
