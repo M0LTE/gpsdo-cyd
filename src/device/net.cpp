@@ -20,8 +20,9 @@ bool txPowerSet = false;
 std::string lastKey;
 std::string deviceId;
 std::string lastError, brokerIp;
+uint32_t lastErrorMs = 0;
 uint32_t publishes = 0, connectedAtMs = 0;
-bool everPublished = false;
+bool everPublished = false, wasConnected = false;
 
 const char* statusTopic() { return MQTT_BASE "/status"; }
 const char* stateTopic() { return MQTT_BASE "/state"; }
@@ -50,6 +51,10 @@ void Net::begin(const Settings& s) {
   // not the replies, and that one-sided delay shows up to clients as a time offset. Staying
   // awake only keeps the receiver on; it adds no transmissions.
   WiFi.setSleep(false);
+  // Join the strongest access point for the network, not the first one a quick scan finds
+  // (it picked a far-off AP on channel 1 while one sat right next to it).
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
   WiFi.begin(cfg.wifiSsid.c_str(), cfg.wifiPass.c_str());
   WiFi.setTxPower(WIFI_TX_POWER);
   uint8_t mac[6];
@@ -73,6 +78,14 @@ void Net::loop(const Monitor& m, uint32_t nowMs) {
                   WiFi.RSSI());
   }
   if (!mqtt.connected()) {
+    if (connectedAtMs && wasConnected) {
+      wasConnected = false;
+      Serial.printf("# MQTT: connection lost (state %d), Wi-Fi signal %d dBm\n", mqtt.state(), WiFi.RSSI());
+      char e[48];
+      snprintf(e, sizeof e, "MQTT connection lost, state %d", mqtt.state());
+      lastError = e;
+      lastErrorMs = nowMs;
+    }
     if (nowMs - lastAttemptMs < retryMs) return;
     lastAttemptMs = nowMs;
     // Look the broker up again on every attempt, so a changed address is followed.
@@ -80,6 +93,7 @@ void Net::loop(const Monitor& m, uint32_t nowMs) {
     if (!WiFi.hostByName(cfg.mqttHost.c_str(), ip)) {
       Serial.printf("# MQTT: DNS lookup for %s failed, retrying\n", cfg.mqttHost.c_str());
       lastError = "DNS lookup for " + std::string(cfg.mqttHost.c_str()) + " failed";
+      lastErrorMs = nowMs;
       retryMs = retryMs < 60000 ? retryMs * 2 : 60000;
       return;
     }
@@ -94,11 +108,13 @@ void Net::loop(const Monitor& m, uint32_t nowMs) {
       char e[48];
       snprintf(e, sizeof e, "MQTT connect failed, state %d", mqtt.state());
       lastError = e;
+      lastErrorMs = nowMs;
       retryMs = retryMs < 60000 ? retryMs * 2 : 60000;
       return;
     }
     retryMs = 5000;
     connectedAtMs = nowMs;
+    wasConnected = true;
     Serial.printf("# MQTT: connected to %s (%s):%u\n", cfg.mqttHost.c_str(), ip.toString().c_str(), cfg.mqttPort);
     announce();
     lastKey.clear();
@@ -128,12 +144,14 @@ void Net::fill(UiExtras& x) const {
   if (x.wifiConnected) {
     x.ip = WiFi.localIP().toString().c_str();
     x.rssi = WiFi.RSSI();
+    x.channel = WiFi.channel();
   }
   x.mqttHost = cfg.mqttHost.c_str();
   x.mqttPort = cfg.mqttPort;
   x.mqttIp = brokerIp;
   x.deviceId = deviceId;
   x.lastError = lastError;
+  x.lastErrorAgeS = (now - lastErrorMs) / 1000;
   x.publishes = publishes;
   if (everPublished) x.lastPublishAgeS = (now - lastPublishMs) / 1000;
   if (x.mqttConnected) x.mqttUpS = (now - connectedAtMs) / 1000;

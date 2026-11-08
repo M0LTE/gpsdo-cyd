@@ -68,18 +68,38 @@ void Monitor::onGpsLine(const std::string& line, uint32_t nowMs, int64_t startUs
 }
 
 void Monitor::addTrend(const ReportLine& d) {
-  if (trendCount_ && d.time >= lastTrendTime_ && d.time - lastTrendTime_ < kTrendStepS) return;
-  lastTrendTime_ = d.time;
-  TrendPoint t;
-  auto clamp16 = [](int32_t v) -> int16_t { return v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v; };
-  t.ns = d.missing10MHz ? 0 : clamp16(d.ns);
-  t.diffNs = clamp16(d.diffNs);
-  t.dac = d.dac;
-  t.status = (uint8_t)d.status;
-  t.valid = d.missing10MHz ? 0 : 1;
-  trend_[trendHead_] = t;
-  trendHead_ = (trendHead_ + 1) % kTrendPoints;
-  if (trendCount_ < kTrendPoints) ++trendCount_;
+  // Close the block when its time is up, or if the Nano's clock went backwards (a restart).
+  if (accOpen_ && (d.time < accStart_ || d.time - accStart_ >= kTrendStepS)) {
+    TrendPoint t{};
+    auto clamp16 = [](int32_t v) -> int16_t { return v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v; };
+    t.valid = accN_ > 0;
+    if (accN_) {
+      t.ns = clamp16(accNs_ / accN_);
+      t.diffNs = clamp16(accDiff_ / accN_);
+      t.dac = (uint16_t)(accDac_ / accN_);
+    }
+    t.lockedAll = accSeen_ && accLocked_ == accSeen_;
+    t.lockedAny = accLocked_ > 0;
+    trend_[trendHead_] = t;
+    trendHead_ = (trendHead_ + 1) % kTrendPoints;
+    if (trendCount_ < kTrendPoints) ++trendCount_;
+    accOpen_ = false;
+  }
+  if (!accOpen_) {
+    accOpen_ = true;
+    accStart_ = d.time - d.time % kTrendStepS;
+    accNs_ = accDiff_ = 0;
+    accDac_ = 0;
+    accN_ = accLocked_ = accSeen_ = 0;
+  }
+  ++accSeen_;
+  if (d.status == LockStatus::Locked) ++accLocked_;
+  if (!d.missing10MHz) {
+    accNs_ += d.ns;
+    accDiff_ += d.diffNs;
+    accDac_ += d.dac;
+    ++accN_;
+  }
 }
 
 void Monitor::tick(uint32_t nowMs) {

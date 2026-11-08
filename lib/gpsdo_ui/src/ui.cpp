@@ -30,12 +30,10 @@ constexpr uint32_t kLime = 0x8CC63F;
 constexpr int kW = 320;
 constexpr int kH = 240;
 constexpr int kFooterH = 22;
-constexpr int kLockCells = 60;
 
 lv_obj_t* O(void* p) { return static_cast<lv_obj_t*>(p); }
 lv_chart_series_t* S(void* p) { return static_cast<lv_chart_series_t*>(p); }
 
-lv_obj_t* lockCells[kLockCells];
 
 lv_obj_t* box(lv_obj_t* parent, int x, int y, int w, int h, uint32_t bg, int radius = 6) {
   lv_obj_t* o = lv_obj_create(parent);
@@ -156,6 +154,14 @@ void Ui::begin() {
   show(kStatus);
 }
 
+void Ui::switchTo(int screen, const Monitor& m, const UiExtras& x, uint32_t nowMs, int64_t nowUs) {
+  current_ = screen;
+  update(m, x, nowMs);
+  fastUpdate(m, nowUs);
+  lv_screen_load(O(screens_[screen]));
+  lv_refr_now(nullptr);
+}
+
 void Ui::show(int screen) {
   current_ = screen;
   lv_screen_load(O(screens_[screen]));
@@ -170,7 +176,7 @@ void Ui::buildStatus() {
   headline_ = text(O(banner_), &lv_font_montserrat_40, 0xFFFFFF, 12, 4, "NO DATA");
   subline_ = text(O(banner_), &lv_font_montserrat_14, 0xFFFFFF, 14, 50, "waiting for the GPSDO");
   lv_obj_set_style_text_opa(O(subline_), LV_OPA_80, 0);
-  lv_obj_set_width(O(subline_), kW - 12 - 28);
+  lv_obj_set_size(O(subline_), kW - 12 - 28, 18);  // one line, "..." if too long
   lv_label_set_long_mode(O(subline_), LV_LABEL_LONG_DOT);
   // Progress bar along the bottom of the banner: warm-up timer, or good seconds towards lock.
   progressTrack_ = box(O(banner_), 14, 69, kW - 12 - 28, 4, 0xFFFFFF, 2);
@@ -183,11 +189,11 @@ void Ui::buildStatus() {
   gpsMain_ = text(g, &lv_font_montserrat_20, kText, 8, 18, "--");
   gpsSub_ = text(g, &lv_font_montserrat_12, kDim, 8, 44, "");
 
-  lv_obj_t* t = tile(s, 6 + w + gap, top, w, h, "TIC");
+  lv_obj_t* t = tile(s, 6 + w + gap, top, w, h, "PHASE VS GPS PULSE");
   ticMain_ = text(t, &lv_font_montserrat_20, kText, 8, 18, "--");
   ticSub_ = text(t, &lv_font_montserrat_12, kDim, 8, 44, "");
 
-  lv_obj_t* d = tile(s, 6, top + h + gap, w, h, "DAC");
+  lv_obj_t* d = tile(s, 6, top + h + gap, w, h, "OSCILLATOR TUNING");
   dacMain_ = text(d, &lv_font_montserrat_20, kText, 8, 18, "--");
   // Range bar 0..65535 with the firmware's warning zones (below 3000, above 62535) in red.
   const int bx = 8, by = 48, bw = w - 16, bh = 6;
@@ -199,7 +205,7 @@ void Ui::buildStatus() {
   dacSub_ = text(d, &lv_font_montserrat_10, kDim, 0, 20, "");
   lv_obj_align(O(dacSub_), LV_ALIGN_TOP_RIGHT, -8, 24);
 
-  lv_obj_t* tt = tile(s, 6 + w + gap, top + h + gap, w, h, "TEMPERATURE");
+  lv_obj_t* tt = tile(s, 6 + w + gap, top + h + gap, w, h, "OSCILLATOR TEMP");
   tempMain_ = text(tt, &lv_font_montserrat_20, kText, 8, 18, "--");
   tempSub_ = text(tt, &lv_font_montserrat_12, kDim, 8, 44, "");
   for (void* l : {gpsSub_, ticSub_, tempSub_, gpsMain_, ticMain_, tempMain_}) {
@@ -236,9 +242,9 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       uint32_t e = m.earliestLockS();
       if (e) {
         fmtDuration(dur, sizeof dur, e);
-        std::snprintf(b, sizeof b, "TIC %+.0f ns, lock in %s at best", m.ticErrorNs(), dur);
+        std::snprintf(b, sizeof b, "%+.0f ns off; earliest lock in %s", m.ticErrorNs(), dur);
       } else {
-        std::snprintf(b, sizeof b, "TIC %+.0f ns off target (limit 100)", m.ticErrorNs());
+        std::snprintf(b, sizeof b, "phase %+.0f ns off target (limit 100)", m.ticErrorNs());
       }
       break;
     }
@@ -276,12 +282,14 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
     setColor(gpsMain_, kFaint);
     setText(gpsSub_, "u-blox not connected");
   } else {
-    const char* mode = (m.alarms() & kAlarmGpsNoFix) ? "NO FIX" : (f.mode == 3 ? "3D" : f.mode == 2 ? "2D" : "FIX");
+    bool noFix = m.alarms() & kAlarmGpsNoFix;
     unsigned used = f.haveGga ? f.satsUsed : (unsigned)g.satsUsed(nowMs);
-    std::snprintf(b, sizeof b, "%s  %u/%u", mode, used, (unsigned)g.satsInView());
+    if (noFix) std::snprintf(b, sizeof b, "no fix");
+    else std::snprintf(b, sizeof b, "%u satellites", used);
     setText(gpsMain_, b);
     setColor(gpsMain_, (m.alarms() & (kAlarmGpsNoFix | kAlarmGpsFewSats | kAlarmGpsSilent)) ? kRed : kText);
-    std::snprintf(b, sizeof b, "used/seen   HDOP %.2f", f.hdop);
+    std::snprintf(b, sizeof b, "%s, %u in view", noFix ? "searching" : f.mode == 3 ? "3D fix" : "2D fix",
+                  (unsigned)g.satsInView());
     setText(gpsSub_, b);
   }
 
@@ -294,7 +302,8 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
   if (d.missing10MHz) std::snprintf(b, sizeof b, "no 10 MHz");
   else std::snprintf(b, sizeof b, "%ld ns", (long)d.ns);
   setText(ticMain_, b);
-  if (d.hasDetail) std::snprintf(b, sizeof b, "diff %ld  err %+.1f  tc %u", (long)d.diffNs, m.ticErrorNs(), (unsigned)d.tc);
+  // The filtered phase is what the firmware locks on; 500 ns is its target.
+  if (d.hasDetail) std::snprintf(b, sizeof b, "average %+.0f ns off target", m.ticErrorNs());
   else b[0] = 0;
   setText(ticSub_, b);
 
@@ -303,13 +312,15 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
   setText(dacMain_, b);
   bool warn = ReportTracker::dacWarning(d.dac);
   setColor(dacMain_, warn ? kRed : kText);
-  setText(dacSub_, warn ? "NEAR LIMIT" : "");
-  setColor(dacSub_, kRed);
+  if (warn) std::snprintf(b, sizeof b, "NEAR LIMIT");
+  else std::snprintf(b, sizeof b, "%u%% of range", (unsigned)((uint32_t)d.dac * 100 / 65535));
+  setText(dacSub_, b);
+  setColor(dacSub_, warn ? kRed : kDim);
   const int bw = 151 - 16;
   lv_obj_set_x(O(dacMarker_), 8 + (int)((long)d.dac * (bw - 3) / 65535));
 
   // Temperature tile.
-  std::snprintf(b, sizeof b, "OCXO %.1f C", d.ocxoC);
+  std::snprintf(b, sizeof b, "%.1f C", d.ocxoC);
   setText(tempMain_, b);
   if (d.hasDetail) std::snprintf(b, sizeof b, "ambient %.1f C", d.ambientC);
   else b[0] = 0;
@@ -488,18 +499,35 @@ void Ui::updateBars(const Monitor& m, uint32_t nowMs) {
 
 // ---------------------------------------------------------------- Trends
 
-static constexpr int kChartPoints = 150;
+static constexpr int kChartPoints = (int)Monitor::kTrendPoints;  // one per 12 s block, 30 minutes
+static constexpr int kStripW = kChartPoints * 2;                  // 2 px per block
+static uint8_t stripBuf[LV_CANVAS_BUF_SIZE(kStripW, 8, 16, LV_DRAW_BUF_STRIDE_ALIGN)];
+
+// A "nice" axis range around [lo, hi] (steps of 1, 2 or 5 x 10^n), kept steady: the old range is
+// reused while the data still fits and fills at least a third of it, so the scale rarely jumps.
+static void niceRange(int32_t lo, int32_t hi, int32_t& rlo, int32_t& rhi, bool haveOld) {
+  if (haveOld && lo >= rlo && hi <= rhi && (hi - lo) * 3 >= (rhi - rlo)) return;
+  int32_t span = std::max<int32_t>(hi - lo, 4);
+  int32_t step = 1;
+  while (step * 4 < span) {
+    if (step * 2 * 4 >= span) { step *= 2; break; }
+    if (step * 5 * 4 >= span) { step *= 5; break; }
+    step *= 10;
+  }
+  rlo = (int32_t)std::floor((double)lo / step) * step - step;
+  rhi = (int32_t)std::ceil((double)hi / step) * step + step;
+}
 
 void Ui::buildTrends() {
   lv_obj_t* s = newScreen();
   screens_[kTrends] = s;
-  const char* titles[3] = {"TIC ns", "diff ns", "DAC"};
+  const char* titles[3] = {"Phase vs GPS pulse, ns", "Phase change per second, ns", "Oscillator tuning (DAC)"};
   const uint32_t colors[3] = {kBlue, kAmber, kGreen};
   for (int i = 0; i < 3; ++i) {
-    int y = 4 + i * 64;
+    int y = 4 + i * 60;
     lv_obj_t* c = lv_chart_create(s);
     lv_obj_set_pos(c, 6, y);
-    lv_obj_set_size(c, kW - 12, 58);
+    lv_obj_set_size(c, kW - 12, 56);
     lv_obj_set_style_bg_color(c, lv_color_hex(kPanel), 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(c, 0, 0);
@@ -512,76 +540,76 @@ void Ui::buildTrends() {
     lv_chart_set_div_line_count(c, 3, 0);
     lv_chart_set_type(c, LV_CHART_TYPE_LINE);
     lv_chart_set_point_count(c, kChartPoints);
-    lv_chart_set_update_mode(c, LV_CHART_UPDATE_MODE_SHIFT);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     series_[i] = lv_chart_add_series(c, lv_color_hex(colors[i]), LV_CHART_AXIS_PRIMARY_Y);
     lv_chart_set_all_value(c, S(series_[i]), LV_CHART_POINT_NONE);
     chart_[i] = c;
     text(c, &lv_font_montserrat_10, kDim, 0, -14, titles[i]);
-    chartRange_[i] = text(c, &lv_font_montserrat_10, kFaint, 60, -14, "");
+    chartRange_[i] = text(c, &lv_font_montserrat_10, kFaint, 0, -14, "");
+    lv_obj_set_width(O(chartRange_[i]), kW - 20);
+    lv_obj_set_style_text_align(O(chartRange_[i]), LV_TEXT_ALIGN_RIGHT, 0);
   }
-  // Lock state strip under the charts: one cell per 30 s, green when locked.
-  int sy = 4 + 3 * 64;
-  for (int i = 0; i < kLockCells; ++i) {
-    lockCells[i] = box(s, 6 + i * (kW - 12) / kLockCells, sy, (kW - 12) / kLockCells + 1, 6, kGrey, 0);
-  }
-  text(s, &lv_font_montserrat_10, kFaint, 6, sy + 8, "-30 min");
-  text(s, &lv_font_montserrat_10, kFaint, 136, sy + 8, "locked");
-  text(s, &lv_font_montserrat_10, kFaint, kW - 30, sy + 8, "now");
+  // Lock history strip: one 2 px column per 12 s block.
+  int sy = 4 + 3 * 60;
+  lv_obj_t* cv = lv_canvas_create(s);
+  lv_canvas_set_buffer(cv, stripBuf, kStripW, 8, LV_COLOR_FORMAT_RGB565);
+  lv_canvas_fill_bg(cv, lv_color_hex(kBg), LV_OPA_COVER);
+  lv_obj_set_pos(cv, kW - 6 - kStripW, sy + 2);
+  lockStrip_ = cv;
+  text(s, &lv_font_montserrat_10, kDim, 8, sy + 12, "Locked: green yes, amber partly, red no");
+  lv_obj_t* r = text(s, &lv_font_montserrat_10, kFaint, 0, sy + 12, "30 min ago ... now");
+  lv_obj_set_width(r, kW - 12);
+  lv_obj_set_style_text_align(r, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
 void Ui::updateTrends(const Monitor& m) {
   size_t n = m.trendCount();
-  const size_t total = Monitor::kTrendPoints;
-  const size_t per = total / kChartPoints;  // trend points per chart point
+  // Right-aligned: the newest block is the last chart point, older ones to its left.
   for (int k = 0; k < 3; ++k) {
     lv_obj_t* c = O(chart_[k]);
     lv_chart_series_t* s = S(series_[k]);
-    int32_t lo = INT32_MAX, hi = INT32_MIN;
+    int32_t lo = INT32_MAX, hi = INT32_MIN, last = 0;
     for (int p = 0; p < kChartPoints; ++p) {
-      // Chart point p covers trend slots [p*per, (p+1)*per) of a full 30-minute window ending now.
-      long start = (long)p * per - (long)(total - n);
-      long sum = 0;
-      int cnt = 0;
-      for (size_t j = 0; j < per; ++j) {
-        long idx = start + (long)j;
-        if (idx < 0 || idx >= (long)n) continue;
+      long idx = (long)p - (kChartPoints - (long)n);
+      int32_t v = LV_CHART_POINT_NONE;
+      if (idx >= 0) {
         const TrendPoint& t = m.trend((size_t)idx);
-        if (!t.valid) continue;
-        sum += k == 0 ? t.ns : k == 1 ? t.diffNs : t.dac;
-        ++cnt;
+        if (t.valid) {
+          v = k == 0 ? t.ns : k == 1 ? t.diffNs : t.dac;
+          lo = std::min(lo, v);
+          hi = std::max(hi, v);
+          last = v;
+        }
       }
-      int32_t v = cnt ? (int32_t)(sum / cnt) : LV_CHART_POINT_NONE;
       lv_chart_set_value_by_id(c, s, p, v);
-      if (cnt) { lo = std::min(lo, v); hi = std::max(hi, v); }
     }
-    char b[40];
+    char b[48];
     if (lo == INT32_MAX) {
       lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, 0, 1);
-      b[0] = 0;
+      std::snprintf(b, sizeof b, "collecting...");
+      haveRange_[k] = false;
     } else {
-      int32_t pad = std::max<int32_t>(2, (hi - lo) / 8);
-      lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, lo - pad, hi + pad);
-      std::snprintf(b, sizeof b, "%ld to %ld", (long)lo, (long)hi);
+      niceRange(lo, hi, rangeLo_[k], rangeHi_[k], haveRange_[k]);
+      haveRange_[k] = true;
+      lv_chart_set_range(c, LV_CHART_AXIS_PRIMARY_Y, rangeLo_[k], rangeHi_[k]);
+      std::snprintf(b, sizeof b, "now %ld, 30 min %ld to %ld", (long)last, (long)lo, (long)hi);
     }
     setText(chartRange_[k], b);
     lv_chart_refresh(c);
   }
-  // Lock strip.
-  const size_t perCell = total / kLockCells;
-  for (int i = 0; i < kLockCells; ++i) {
-    long start = (long)i * perCell - (long)(total - n);
-    int locked = 0, other = 0;
-    for (size_t j = 0; j < perCell; ++j) {
-      long idx = start + (long)j;
-      if (idx < 0 || idx >= (long)n) continue;
-      if (m.trend((size_t)idx).status == (uint8_t)LockStatus::Locked) ++locked;
-      else ++other;
+  lv_obj_t* cv = O(lockStrip_);
+  for (int p = 0; p < kChartPoints; ++p) {
+    long idx = (long)p - (kChartPoints - (long)n);
+    uint32_t col = kBg;
+    if (idx >= 0) {
+      const TrendPoint& t = m.trend((size_t)idx);
+      col = t.lockedAll ? kGreen : t.lockedAny ? kAmber : kRed;
     }
-    uint32_t c = !(locked + other) ? kBg : other ? (locked ? kAmber : kRed) : kGreen;
-    lv_obj_set_style_bg_color(lockCells[i], lv_color_hex(c), 0);
+    for (int x = 0; x < 2; ++x)
+      for (int y = 0; y < 8; ++y) lv_canvas_set_px(cv, p * 2 + x, y, lv_color_hex(col), LV_OPA_COVER);
   }
+  lv_obj_invalidate(cv);
 }
 
 // ---------------------------------------------------------------- Time and position
@@ -710,14 +738,13 @@ void Ui::updateNetwork(const UiExtras& x) {
   set(0, x.ssid + (x.wifiConnected ? "" : "  (not connected)"), x.wifiConnected ? kText : kAmber);
   if (x.wifiConnected) {
     const char* q = x.rssi >= -60 ? "good" : x.rssi >= -72 ? "fair" : "weak";
-    std::snprintf(b, sizeof b, "%d dBm (%s)", x.rssi, q);
+    std::snprintf(b, sizeof b, "%d dBm (%s), channel %d", x.rssi, q, x.channel);
     set(1, b, x.rssi >= -72 ? kText : kAmber);
   } else {
     set(1, "");
   }
   set(2, x.wifiConnected ? x.ip : "");
-  std::snprintf(b, sizeof b, "%s, %u requests answered", x.ntpSynced ? "stratum 1 (GPS)" : "not synced, clients told to ignore",
-                (unsigned)x.ntpRequests);
+  std::snprintf(b, sizeof b, "%s, %u served", x.ntpSynced ? "stratum 1 (GPS)" : "not synced", (unsigned)x.ntpRequests);
   set(3, x.wifiConnected ? b : "", x.ntpSynced ? kGreen : kAmber);
   std::snprintf(b, sizeof b, "%s:%u", x.mqttHost.c_str(), (unsigned)x.mqttPort);
   set(4, b);
@@ -736,7 +763,15 @@ void Ui::updateNetwork(const UiExtras& x) {
   } else {
     set(7, "");
   }
-  set(8, x.lastError, kAmber);
+  if (x.lastError.empty()) {
+    set(8, "none");
+    setColor(netVal_[8], kFaint);
+  } else {
+    char ago[24];
+    fmtDuration(ago, sizeof ago, x.lastErrorAgeS);
+    std::snprintf(b, sizeof b, "%s ago: %s", ago, x.lastError.c_str());
+    set(8, b, x.mqttConnected ? kDim : kAmber);  // dim once it has recovered
+  }
 }
 
 // ---------------------------------------------------------------- Wi-Fi setup

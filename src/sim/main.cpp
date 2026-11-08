@@ -177,6 +177,7 @@ int main(int argc, char** argv) {
   x.ip = "192.0.2.41";
   x.mac = "48:AF:F3:00:00:00";
   x.rssi = -61;
+  x.channel = 6;
   x.mqttHost = "homeassistant.local";
   x.mqttIp = "192.0.2.10";
   x.mqttPort = 1883;

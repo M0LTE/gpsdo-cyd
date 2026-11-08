@@ -37,19 +37,23 @@ enum Alarm : uint16_t {
 enum class Headline : uint8_t { NoData, NoPps, Missing10MHz, RefSuspect, Unlocked, Holdover, WarmUp, Locked };
 const char* headlineText(Headline h);
 
+// One trend point covers kTrendStepS seconds of reports: the averages over that block, and
+// whether the GPSDO was locked for all of it. Points are final once stored, so a chart of them
+// only ever shifts left; nothing already drawn is recomputed.
 struct TrendPoint {
   int16_t ns;
   int16_t diffNs;
   uint16_t dac;
-  uint8_t status;  // LockStatus
-  uint8_t valid;
+  uint8_t lockedAll;  // 1 if every report in the block said Locked
+  uint8_t lockedAny;  // 1 if at least one did
+  uint8_t valid;      // 0 if no usable reports in the block
 };
 
 class Monitor {
 public:
   static constexpr uint32_t kSilentMs = 3000;
-  static constexpr uint32_t kTrendStepS = 2;        // one stored point per 2 Nano seconds
-  static constexpr size_t kTrendPoints = 900;       // 30 minutes
+  static constexpr uint32_t kTrendStepS = 12;       // one stored point per 12 s of reports
+  static constexpr size_t kTrendPoints = 150;       // 30 minutes
 
   // startUs: local microseconds when the line's first byte arrived. For the Nano that marks the
   // PPS edge (the report starts right after it); for NMEA it pairs the sentence with its second.
@@ -126,6 +130,12 @@ private:
   std::array<TrendPoint, kTrendPoints> trend_{};
   size_t trendHead_ = 0, trendCount_ = 0;
   uint32_t lastTrendTime_ = 0;
+  // Block being accumulated.
+  int32_t accNs_ = 0, accDiff_ = 0;
+  uint32_t accDac_ = 0;
+  uint16_t accN_ = 0, accLocked_ = 0, accSeen_ = 0;
+  uint32_t accStart_ = 0;
+  bool accOpen_ = false;
   uint32_t lastNowMs_ = 0;
 };
 

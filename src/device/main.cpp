@@ -144,7 +144,11 @@ void pumpConsole() {
     if (l.size() < 2 || l[1] != ' ') continue;
     if (l[0] == 'N') monitor.onNanoLine(l.substr(2), millis());
     else if (l[0] == 'G') monitor.onGpsLine(l.substr(2), millis());
-    else if (l[0] == 'S') ui.show((l[2] - '1') % Ui::kScreens);
+    else if (l[0] == 'S') {
+      UiExtras x;
+      net.fill(x);
+      ui.switchTo((l[2] - '1') % Ui::kScreens, monitor, x, millis(), esp_timer_get_time());
+    }
   }
 }
 
@@ -153,10 +157,9 @@ void pollTouch(uint32_t now) {
   bool t = touch.tirqTouched() && touch.touched();
   if (t && !wasTouched && now - lastTouchMs > 250) {
     lastTouchMs = now;
-    ui.next();
     UiExtras x;
     net.fill(x);
-    ui.update(monitor, x, now);
+    ui.switchTo((ui.current() + 1) % Ui::kScreens, monitor, x, now, esp_timer_get_time());
   }
   wasTouched = t;
 }

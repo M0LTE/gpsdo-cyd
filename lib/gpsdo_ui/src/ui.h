@@ -15,7 +15,8 @@ struct UiExtras {
   bool mqttConnected = false;
   // Network screen details (empty when unknown).
   std::string ssid, ip, mac, mqttHost, mqttIp, lastError, deviceId;
-  int rssi = 0;
+  int rssi = 0, channel = 0;
+  uint32_t lastErrorAgeS = 0;
   uint16_t mqttPort = 0;
   uint32_t publishes = 0;
   uint32_t lastPublishAgeS = UINT32_MAX;
@@ -34,6 +35,9 @@ public:
   void update(const Monitor& m, const UiExtras& x, uint32_t nowMs);
   void show(int screen);
   void next() { show((current_ + 1) % kScreens); }
+  // Switch screens and draw the new one with fresh data straight away, so it never shows
+  // whatever it held when last visible.
+  void switchTo(int screen, const Monitor& m, const UiExtras& x, uint32_t nowMs, int64_t nowUs);
   // Call often (every ~50 ms) to keep the tenths moving on the time screen; cheap otherwise.
   // nowUs is on the same local microsecond clock as the timestamps given to the monitor.
   void fastUpdate(const Monitor& m, int64_t nowUs);
@@ -104,6 +108,8 @@ private:
   void* series_[3] = {};
   void* chartRange_[3] = {};
   void* lockStrip_ = nullptr;
+  int32_t rangeLo_[3] = {}, rangeHi_[3] = {};
+  bool haveRange_[3] = {};
 };
 
 }  // namespace gpsdo
