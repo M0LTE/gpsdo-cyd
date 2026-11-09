@@ -246,13 +246,14 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
   char dur[24];
   switch (h) {
     case Headline::Locked:
-      fmtDuration(dur, sizeof dur, n.secondsLocked());
+      bool known;
+      fmtDuration(dur, sizeof dur, m.secondsLocked(nowMs, known));
       if (m.missedPpsSinceStart())
-        std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s, %u missed pulse%s", dur, n.lockedSinceKnown() ? "" : "+",
+        std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s, %u missed pulse%s", dur, known ? "" : "+",
                       (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es", (unsigned)m.missedPpsSinceStart(),
                       m.missedPpsSinceStart() == 1 ? "" : "s");
       else
-        std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s", dur, n.lockedSinceKnown() ? "" : "+",
+        std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s", dur, known ? "" : "+",
                       (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es");
       if (m.gpsdoRestarts() || m.gpsRestarts()) {
         char ago[24];

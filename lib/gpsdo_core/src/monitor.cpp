@@ -406,6 +406,15 @@ bool Monitor::top4Range(int& lo, int& hi) const {
   return true;
 }
 
+uint32_t Monitor::secondsLocked(uint32_t nowMs, bool& known) const {
+  if (haveStatus(nowMs) && status_.locked && status_.lockCount > status_.lockTarget) {
+    known = true;
+    return status_.lockCount - status_.lockTarget;
+  }
+  known = nano_.lockedSinceKnown();
+  return nano_.secondsLocked();
+}
+
 float Monitor::ticErrorNs() const {
   if (haveStatus(lastNowMs_)) return (float)status_.ticErrNs;
   const ReportLine& d = nano_.last();

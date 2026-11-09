@@ -112,6 +112,11 @@ public:
   // PPS pulses the Nano has missed since the display started (from the status line).
   uint32_t missedPpsSinceStart() const { return missedSinceStart_; }
 
+  // Seconds the GPSDO has been locked. With our Nano firmware's status line this is its own lock
+  // counter minus the target, so it survives restarts of the display; known says whether the start
+  // of the lock was actually seen (otherwise it is a lower bound).
+  uint32_t secondsLocked(uint32_t nowMs, bool& known) const;
+
   // Filtered TIC minus TIC_Offset, ns, as used by the firmware's lock test. Valid if hasDetail.
   float ticErrorNs() const;
   // While unlocked: the soonest the firmware could declare lock (5 x tc minus seconds since the

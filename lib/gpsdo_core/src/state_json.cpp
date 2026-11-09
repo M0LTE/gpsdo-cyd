@@ -40,7 +40,8 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
   add(s, "state", "\"%s\"", headlineText(m.headline()));
   add(s, "reference_ok", "%s", tf(m.referenceOk()));
   add(s, "locked", "%s", tf(n.locked() && n.msSinceData(nowMs) <= Monitor::kSilentMs));
-  add(s, "locked_s", "%u", (unsigned)n.secondsLocked());
+  bool lockKnown;
+  add(s, "locked_s", "%u", (unsigned)m.secondsLocked(nowMs, lockKnown));
   add(s, "lock_losses", "%u", (unsigned)n.lockLosses());
   add(s, "gpsdo_restarts", "%u", (unsigned)m.gpsdoRestarts());
   add(s, "gps_restarts", "%u", (unsigned)m.gpsRestarts());
@@ -126,21 +127,37 @@ struct Entity {
   const char* extra;  // extra JSON members, already comma-led, or ""
 };
 const Entity kEntities[] = {
-    {"binary_sensor", "reference_ok", "Reference OK", "{{ 'ON' if value_json.reference_ok else 'OFF' }}", ""},
-    {"binary_sensor", "locked", "Locked", "{{ 'ON' if value_json.locked else 'OFF' }}", ""},
-    {"sensor", "state", "State", "{{ value_json.state }}", ""},
-    {"sensor", "tic_ns", "TIC", "{{ value_json.tic_ns }}", ",\"unit_of_measurement\":\"ns\",\"state_class\":\"measurement\""},
-    {"sensor", "tic_error_ns", "TIC error", "{{ value_json.tic_error_ns }}", ",\"unit_of_measurement\":\"ns\",\"state_class\":\"measurement\""},
-    {"sensor", "dac", "DAC", "{{ value_json.dac }}", ",\"state_class\":\"measurement\""},
-    {"sensor", "ocxo_c", "OCXO temperature", "{{ value_json.ocxo_c }}", ",\"device_class\":\"temperature\",\"unit_of_measurement\":\"\\u00b0C\",\"state_class\":\"measurement\""},
+    {"binary_sensor", "reference_ok", "Reference OK", "{{ 'ON' if value_json.reference_ok else 'OFF' }}",
+     ",\"icon\":\"mdi:check-decagram\""},
+    {"binary_sensor", "locked", "Locked", "{{ 'ON' if value_json.locked else 'OFF' }}", ",\"icon\":\"mdi:lock\""},
+    {"binary_sensor", "gps_interference", "GPS interference",
+     "{{ 'ON' if ('gps_spoofing' in value_json.alarms or 'gps_signal_loss' in value_json.alarms) else 'OFF' }}",
+     ",\"device_class\":\"problem\""},
+    {"sensor", "state", "State", "{{ value_json.state }}", ",\"icon\":\"mdi:information-outline\""},
+    {"sensor", "tic_ns", "Phase vs GPS pulse", "{{ value_json.tic_ns }}",
+     ",\"unit_of_measurement\":\"ns\",\"state_class\":\"measurement\",\"icon\":\"mdi:sine-wave\""},
+    {"sensor", "tic_error_ns", "Phase error (lock test)",
+     "{{ value_json.lock_test_tic_ns if value_json.lock_test_tic_ns is defined else value_json.tic_error_ns }}",
+     ",\"unit_of_measurement\":\"ns\",\"state_class\":\"measurement\",\"suggested_display_precision\":0,\"icon\":\"mdi:target\""},
+    {"sensor", "dac", "Oscillator tuning (DAC)", "{{ value_json.dac }}",
+     ",\"state_class\":\"measurement\",\"icon\":\"mdi:tune-vertical\""},
+    {"sensor", "ocxo_c", "Oscillator temperature", "{{ value_json.ocxo_c }}", ",\"device_class\":\"temperature\",\"unit_of_measurement\":\"\\u00b0C\",\"state_class\":\"measurement\""},
     {"sensor", "ambient_c", "Ambient temperature", "{{ value_json.ambient_c }}", ",\"device_class\":\"temperature\",\"unit_of_measurement\":\"\\u00b0C\",\"state_class\":\"measurement\""},
-    {"sensor", "locked_s", "Time locked", "{{ value_json.locked_s }}", ",\"device_class\":\"duration\",\"unit_of_measurement\":\"s\""},
-    {"sensor", "lock_losses", "Lock losses", "{{ value_json.lock_losses }}", ",\"state_class\":\"total_increasing\""},
-    {"sensor", "sats_used", "Satellites used", "{{ value_json.sats_used }}", ",\"state_class\":\"measurement\""},
-    {"sensor", "freq_error_ppb_30min", "Frequency error (30 min)", "{{ value_json.freq_error_ppb_30min }}", ",\"unit_of_measurement\":\"ppb\",\"state_class\":\"measurement\""},
-    {"sensor", "antenna", "GPS antenna", "{{ value_json.antenna }}", ""},
-    {"sensor", "gpsdo_restarts", "GPSDO restarts", "{{ value_json.gpsdo_restarts }}", ",\"state_class\":\"total_increasing\""},
-    {"sensor", "gps_restarts", "GPS restarts", "{{ value_json.gps_restarts }}", ",\"state_class\":\"total_increasing\""},
+    {"sensor", "locked_s", "Time locked", "{{ value_json.locked_s }}",
+     ",\"device_class\":\"duration\",\"unit_of_measurement\":\"s\",\"suggested_display_precision\":0,\"icon\":\"mdi:timer-lock-outline\""},
+    {"sensor", "lock_progress", "Lock progress",
+     "{{ [100, ((value_json.lock_counter / (value_json.lock_target + 1)) * 100) | round(0)] | min if value_json.lock_target is defined else (100 if value_json.locked else 0) }}",
+     ",\"unit_of_measurement\":\"%\",\"icon\":\"mdi:progress-clock\""},
+    {"sensor", "lock_losses", "Lock losses", "{{ value_json.lock_losses }}", ",\"state_class\":\"total_increasing\",\"icon\":\"mdi:lock-alert\""},
+    {"sensor", "missed_pps", "Missed GPS pulses", "{{ value_json.missed_pps_total | default(0) }}",
+     ",\"state_class\":\"total_increasing\",\"icon\":\"mdi:pulse\""},
+    {"sensor", "sats_used", "Satellites used", "{{ value_json.sats_used }}", ",\"state_class\":\"measurement\",\"icon\":\"mdi:satellite-variant\""},
+    {"sensor", "freq_error_ppb_30min", "Frequency error (30 min)", "{{ value_json.freq_error_ppb_30min }}",
+     ",\"unit_of_measurement\":\"ppb\",\"state_class\":\"measurement\",\"suggested_display_precision\":4,\"icon\":\"mdi:sine-wave\""},
+    {"sensor", "antenna", "GPS antenna", "{{ value_json.antenna if value_json.antenna is defined else 'not reported yet' }}",
+     ",\"icon\":\"mdi:antenna\""},
+    {"sensor", "gpsdo_restarts", "GPSDO restarts", "{{ value_json.gpsdo_restarts }}", ",\"state_class\":\"total_increasing\",\"icon\":\"mdi:restart\""},
+    {"sensor", "gps_restarts", "GPS restarts", "{{ value_json.gps_restarts }}", ",\"state_class\":\"total_increasing\",\"icon\":\"mdi:restart\""},
 };
 }  // namespace
 
