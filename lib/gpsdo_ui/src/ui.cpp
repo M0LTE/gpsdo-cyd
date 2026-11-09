@@ -2,6 +2,7 @@
 
 #include "age.h"
 #include "locator.h"
+#include "tempfit.h"
 
 #include <lvgl.h>
 
@@ -147,7 +148,10 @@ void Ui::build(int i) {
     case kHistory: buildHistory(); break;
     case kEvents: buildEvents(); break;
     case kNetwork: buildNetwork(); break;
+    case kStability: buildStability(); break;
+    case kSkyMap: buildSkyMap(); break;
   }
+  skyMapSig_ = UINT32_MAX;
   // Fresh screens must redraw everything on their first update.
   histSig_ = 0;
   lastClockDs_ = -1;
@@ -1033,6 +1037,158 @@ void Ui::updateEvents(const Monitor& m) {
   else lv_obj_remove_flag(O(evEmpty_), LV_OBJ_FLAG_HIDDEN);
 }
 
+
+// ---------------------------------------------------------------- Stability (Allan deviation)
+
+static constexpr int kPlotX = 46, kPlotY = 26, kPlotW = 264, kPlotH = 112;
+static constexpr double kAdevTop = -7.0, kAdevDecades = 5.0;  // 1e-7 down to 1e-12
+static lv_point_precise_t stabPts[Stability::kTaus];
+
+static int plotX(double tau) { return kPlotX + (int)std::lround(kPlotW * std::log10(tau) / 3.0); }
+static int plotY(double adev) {
+  double v = std::log10(adev);
+  if (v > kAdevTop) v = kAdevTop;
+  if (v < kAdevTop - kAdevDecades) v = kAdevTop - kAdevDecades;
+  return kPlotY + (int)std::lround(kPlotH * (kAdevTop - v) / kAdevDecades);
+}
+
+void Ui::buildStability() {
+  lv_obj_t* s = newScreen();
+  screens_[kStability] = s;
+  text(s, &lv_font_montserrat_12, kText, 8, 6, "STABILITY");
+  text(s, &lv_font_montserrat_10, kFaint, 90, 8, "Allan deviation against GPS");
+  box(s, kPlotX, kPlotY, kPlotW, kPlotH, kPanel, 0);
+  for (int d = 0; d <= 5; ++d) {
+    int y = kPlotY + kPlotH * d / 5;
+    box(s, kPlotX, y, kPlotW, 1, kLine, 0);
+    char b[8];
+    std::snprintf(b, sizeof b, "1e%d", (int)kAdevTop - d);
+    text(s, &lv_font_montserrat_10, kFaint, 10, y - 6, b);
+  }
+  const char* tl[4] = {"1 s", "10 s", "100 s", "1000 s"};
+  for (int d = 0; d <= 3; ++d) {
+    int x = kPlotX + kPlotW * d / 3;
+    box(s, x, kPlotY, 1, kPlotH, kLine, 0);
+    text(s, &lv_font_montserrat_10, kFaint, x - (d == 3 ? 30 : 6), kPlotY + kPlotH + 2, tl[d]);
+  }
+  lv_obj_t* line = lv_line_create(s);
+  lv_obj_set_style_line_color(line, lv_color_hex(kBlue), 0);
+  lv_obj_set_style_line_width(line, 2, 0);
+  lv_obj_set_pos(line, 0, 0);
+  stabLine_ = line;
+  for (int i = 0; i < Stability::kTaus; ++i) {
+    stabDot_[i] = box(s, 0, 0, 6, 6, kBlue, 3);
+    lv_obj_add_flag(O(stabDot_[i]), LV_OBJ_FLAG_HIDDEN);
+  }
+  stabEmpty_ = text(s, &lv_font_montserrat_12, kFaint, kPlotX + 30, kPlotY + 46, "needs a few minutes of locked data");
+  stabNote_ = text(s, &lv_font_montserrat_10, kDim, 8, kPlotY + kPlotH + 16, "");
+  tempNote_ = text(s, &lv_font_montserrat_10, kDim, 8, kPlotY + kPlotH + 30, "");
+  lv_obj_set_width(O(tempNote_), kW - 16);
+  lv_label_set_long_mode(O(tempNote_), LV_LABEL_LONG_WRAP);
+}
+
+void Ui::updateStability(const Monitor& m) {
+  int n = 0;
+  for (int i = 0; i < Stability::kTaus; ++i) {
+    double a;
+    if (!m.stability().adev(Stability::kTau[i], a) || a <= 0) {
+      lv_obj_add_flag(O(stabDot_[i]), LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    int x = plotX(Stability::kTau[i]), y = plotY(a);
+    stabPts[n].x = x;
+    stabPts[n].y = y;
+    ++n;
+    lv_obj_set_pos(O(stabDot_[i]), x - 3, y - 3);
+    lv_obj_remove_flag(O(stabDot_[i]), LV_OBJ_FLAG_HIDDEN);
+  }
+  lv_line_set_points(O(stabLine_), stabPts, (uint32_t)n);
+  if (n) lv_obj_add_flag(O(stabEmpty_), LV_OBJ_FLAG_HIDDEN);
+  else lv_obj_remove_flag(O(stabEmpty_), LV_OBJ_FLAG_HIDDEN);
+  char b[140];
+  std::snprintf(b, sizeof b, "%u min locked. Left: GPS pulse jitter. Right: oscillator + loop.",
+                (unsigned)(m.stability().samples() / 60));
+  setText(stabNote_, b);
+  TempFit f = fitTemperature(m.history(), 655);
+  if (f.points >= 8)
+    std::snprintf(b, sizeof b,
+                  "Temperature: tuning moves %+.1f per C (explains %.0f%% of it, %d blocks). Would need tempRef %ld, "
+                  "tempCoeff %ld. Not applied.",
+                  f.slopeDacPerC, f.r2 * 100, f.points, f.suggestedTempRef, f.suggestedTempCoeff);
+  else
+    std::snprintf(b, sizeof b, "Temperature fit: waiting for the GPSDO's 3-hour history.");
+  setText(tempNote_, b);
+}
+
+// ---------------------------------------------------------------- Sky map (long-term signal by direction)
+
+static constexpr int kMapSize = 150, kMapR = 72;
+
+static void freeCanvasBuf(lv_event_t* e) {
+  lv_draw_buf_t* buf = static_cast<lv_draw_buf_t*>(lv_event_get_user_data(e));
+  if (buf) lv_draw_buf_destroy(buf);
+}
+
+void Ui::buildSkyMap() {
+  lv_obj_t* s = newScreen();
+  screens_[kSkyMap] = s;
+  text(s, &lv_font_montserrat_12, kText, 8, 6, "SKY MAP");
+  text(s, &lv_font_montserrat_10, kFaint, 82, 8, "average signal by direction");
+  // The canvas buffer (45 KB) exists only while this screen is shown.
+  lv_draw_buf_t* buf = lv_draw_buf_create(kMapSize, kMapSize, LV_COLOR_FORMAT_RGB565, 0);
+  lv_obj_t* cv = lv_canvas_create(s);
+  if (buf) {
+    lv_canvas_set_draw_buf(cv, buf);
+    lv_obj_add_event_cb(cv, freeCanvasBuf, LV_EVENT_DELETE, buf);
+  }
+  lv_obj_set_pos(cv, 30, 34);
+  skyMapCanvas_ = buf ? cv : nullptr;
+  int cx = 30 + kMapSize / 2, cy = 34 + kMapSize / 2;
+  ring(s, cx, cy, kMapR, kLine, 1);
+  ring(s, cx, cy, kMapR * 2 / 3, kLine, 1);
+  ring(s, cx, cy, kMapR / 3, kLine, 1);
+  text(s, &lv_font_montserrat_10, kDim, cx - 3, cy - kMapR - 14, "N");
+  text(s, &lv_font_montserrat_10, kDim, cx + kMapR + 4, cy - 6, "E");
+  text(s, &lv_font_montserrat_10, kDim, cx - 3, cy + kMapR + 2, "S");
+  text(s, &lv_font_montserrat_10, kDim, cx - kMapR - 12, cy - 6, "W");
+  const uint32_t keyC[5] = {kGreen, kLime, kAmber, kRed, kPanel};
+  const char* keyT[5] = {"40+ dB-Hz", "30-39", "20-29", "under 20", "not seen yet"};
+  for (int i = 0; i < 5; ++i) {
+    box(s, 210, 50 + i * 16, 9, 9, keyC[i], 2);
+    text(s, &lv_font_montserrat_10, kDim, 224, 48 + i * 16, keyT[i]);
+  }
+  skyMapNote_ = text(s, &lv_font_montserrat_10, kDim, 210, 140, "");
+  lv_obj_set_width(O(skyMapNote_), 104);
+  lv_label_set_long_mode(O(skyMapNote_), LV_LABEL_LONG_WRAP);
+}
+
+void Ui::updateSkyMap(const Monitor& m) {
+  const SkyMap& k = m.skyMap();
+  char b[96];
+  std::snprintf(b, sizeof b, "%u readings. Weak or empty areas: blocked sky.", (unsigned)k.samples());
+  setText(skyMapNote_, b);
+  if (!skyMapCanvas_) return;
+  uint32_t sig = k.samples() / 20;  // redraw when a few new readings have come in
+  if (sig == skyMapSig_) return;
+  skyMapSig_ = sig;
+  lv_obj_t* cv = O(skyMapCanvas_);
+  const float r0 = kMapSize / 2.0f;
+  for (int y = 0; y < kMapSize; ++y)
+    for (int x = 0; x < kMapSize; ++x) {
+      float dx = x - r0 + 0.5f, dy = y - r0 + 0.5f, r = std::sqrt(dx * dx + dy * dy);
+      uint32_t c = kBg;
+      if (r <= kMapR) {
+        int el = (int)(90.0f * (1.0f - r / kMapR));
+        int az = (int)(std::atan2(dx, -dy) * 180.0f / 3.14159265f);
+        if (az < 0) az += 360;
+        float v = k.mean(el >= 90 ? SkyMap::kEl - 1 : el / 10, (az % 360) / 10);
+        c = v < 0 ? kPanel : snrColor((int)v);
+      }
+      lv_canvas_set_px(cv, x, y, lv_color_hex(c), LV_OPA_COVER);
+    }
+  lv_obj_invalidate(cv);
+}
+
 // ---------------------------------------------------------------- Wi-Fi setup
 
 void Ui::showSetup(const char* apSsid, const char* apPass, const char* url, const char* status, uint32_t secondsLeft) {
@@ -1100,6 +1256,8 @@ void Ui::update(const Monitor& m, const UiExtras& x, uint32_t nowMs) {
     case kAccuracy: updateAccuracy(m); break;
     case kHistory: updateHistory(m); break;
     case kEvents: updateEvents(m); break;
+    case kStability: updateStability(m); break;
+    case kSkyMap: updateSkyMap(m); break;
   }
   updateFooter(current_, m, x, nowMs);
 }

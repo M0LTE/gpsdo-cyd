@@ -38,8 +38,8 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startU
       uint32_t n = st.missedPps - lastMissed_;
       missedSinceStart_ += n;
       char b[48];
-      std::snprintf(b, sizeof b, "GPS pulse missed%s (%u since display start)", n > 1 ? " several times" : "",
-                    (unsigned)missedSinceStart_);
+      std::snprintf(b, sizeof b, "Missed %u GPS pulse%s (%u since start)", (unsigned)(n % 1000), n > 1 ? "s" : "",
+                    (unsigned)(missedSinceStart_ % 100000));
       if (eventsArmed_) logEvent(nowMs, 1, b);
     }
     lastMissed_ = st.missedPps;
@@ -72,6 +72,7 @@ void Monitor::onNanoLine(const std::string& line, uint32_t nowMs, int64_t startU
     haveUnlockStart_ = false;
   }
   addTrend(d);
+  stability_.add(d.time, d.ns, d.status == LockStatus::Locked && !d.missing10MHz && d.hasDetail);
   history_.onTail(p.tail);
   tick(nowMs);
 }
@@ -198,8 +199,28 @@ void Monitor::tick(uint32_t nowMs) {
     uint8_t used = f.haveGga ? f.satsUsed : (uint8_t)nmea_.satsUsed(nowMs);
     if (fixKnown && used < 4) a |= kAlarmGpsFewSats;
   }
+  // Once a second: interference watch; every 10 s: sky map.
+  if (gpsLive && ageMs(nowMs, lastWatchMs_) >= 1000) {
+    lastWatchMs_ = nowMs;
+    double sum = 0, sum2 = 0;
+    int n = 0;
+    for (const auto& sat : nmea_.satellites())
+      if (sat.valid && sat.snr >= 0 && nmea_.isUsed(sat, nowMs)) { sum += sat.snr; sum2 += sat.snr * sat.snr; ++n; }
+    float mean = n ? (float)(sum / n) : 0, sd = n > 1 ? (float)std::sqrt(std::fmax(0.0, sum2 / n - (sum / n) * (sum / n))) : 0;
+    const Fix& fx = nmea_.fix();
+    bool good3d = !(a & (kAlarmGpsNoFix | kAlarmGpsFewSats)) && fx.haveGga && fx.haveLatLon && fx.mode == 3;
+    if (clock_.steps() != clockSteps_) { clockSteps_ = clock_.steps(); watch_.noteTimeStep(nowMs); }
+    watch_.update(nowMs, top4_, good3d, fx.latDeg, fx.lonDeg, fx.altitudeM, fx.hdop, mean, sd, n);
+  }
+  if (gpsLive && ageMs(nowMs, lastSkyMs_) >= 10000) {
+    lastSkyMs_ = nowMs;
+    for (const auto& sat : nmea_.satellites())
+      if (sat.valid && sat.elevation >= 0 && sat.azimuth >= 0 && sat.snr >= 0) skyMap_.add(sat.elevation, sat.azimuth, sat.snr);
+  }
+  if (gpsSeen_ && watch_.spoofing(nowMs)) a |= kAlarmGpsSpoof;
+  if (gpsSeen_ && watch_.jamming()) a |= kAlarmGpsSignalLoss;
   bool locked = nanoLive && nano_.locked();
-  bool gpsGood = gpsLive && nmea_.fix().haveGga && !(a & (kAlarmGpsNoFix | kAlarmGpsFewSats));
+  bool gpsGood = gpsLive && nmea_.fix().haveGga && !(a & (kAlarmGpsNoFix | kAlarmGpsFewSats | kAlarmGpsSpoof));
   bool gpsUnknownYet = gpsLive && !nmea_.fix().haveGga && !nmea_.fix().haveGsa;
   // Only claim "suspect" when we have heard the GPS at all; before the tap is wired it is unknown.
   if (locked && gpsSeen_ && !gpsGood && !gpsUnknownYet) a |= kAlarmRefSuspect;
@@ -303,6 +324,21 @@ void Monitor::detectEvents(uint32_t nowMs) {
     else std::snprintf(b, sizeof b, "GPS fix lost or weak (%u satellites)", (unsigned)nmea_.fix().satsUsed);
     logEvent(nowMs, gpsGood ? 0 : 2, b);
     prevGpsGood_ = gpsGood;
+  }
+  bool spoof = alarms_ & kAlarmGpsSpoof, loss = alarms_ & kAlarmGpsSignalLoss;
+  if (spoof != prevSpoof_) {
+    if (spoof) {
+      logEvent(nowMs, 2, watch_.positionJump() ? "GPS spoofing? Position jumped"
+                         : watch_.uniformSignals() ? "GPS spoofing? Signals too uniform"
+                                                   : "GPS spoofing? GPS time stepped");
+    } else {
+      logEvent(nowMs, 0, "GPS spoofing signs cleared");
+    }
+    prevSpoof_ = spoof;
+  }
+  if (loss != prevSignalLoss_) {
+    logEvent(nowMs, loss ? 2 : 0, loss ? "GPS signals down 10 dB+ (jamming? antenna?)" : "GPS signal levels back to normal");
+    prevSignalLoss_ = loss;
   }
   if (ant != prevAntenna_ && !ant.empty()) {
     std::snprintf(b, sizeof b, "GPS antenna: %s", ant.c_str());

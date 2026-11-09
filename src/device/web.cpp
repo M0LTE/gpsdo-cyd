@@ -115,6 +115,8 @@ void begin(Monitor& m, Net& net) {
   server.on("/api/sats", HTTP_GET, [] { serveJson([](std::string& o) { satsJson(*mon, millis(), o); }); });
   server.on("/api/accuracy", HTTP_GET, [] { serveJson([](std::string& o) { accuracyJson(*mon, o); }); });
   server.on("/api/time", HTTP_GET, [] { serveJson([](std::string& o) { timeJson(*mon, esp_timer_get_time(), millis(), o); }); });
+  server.on("/api/stability", HTTP_GET, [] { serveJson([](std::string& o) { stabilityJson(*mon, 655, o); }); });
+  server.on("/api/skymap", HTTP_GET, [] { serveJson([](std::string& o) { skyMapJson(*mon, o); }); });
   server.on("/api/network", HTTP_GET, [] { serveJson([](std::string& o) { networkJson(o); }); });
   server.onNotFound([] { server.send(404, "text/plain", "not found"); });
   server.begin();

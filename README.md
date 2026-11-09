@@ -19,16 +19,27 @@ Tap anywhere for the next screen.
 1. **Status.** A big coloured banner with the state, then GPS satellites and fix, phase against the GPS pulse, oscillator tuning (with its usable range and the red end zones) and oscillator temperature. During start-up and while locking, a bar shows progress.
 2. **Time and position.** UTC to a tenth of a second, the date, latitude and longitude, altitude and the 8-character Maidenhead locator. The position is only shown, never published.
 3. **10 MHz accuracy.** The average frequency error over 1, 5 and 30 minutes in parts per billion, from the change in phase against the GPS pulse, and what the 30-minute figure means in hertz on 3.5 to 144 MHz.
-4. **Sky.** Where the satellites are. Filled dots are used in the fix, rings are only in view; colour is signal strength.
-5. **Signal.** Signal strength per satellite, strongest first, with the antenna status the GPS reports and the average of the best four over 24 hours (a slowly failing antenna or cable shows here first).
-6. **Trends.** The last 30 minutes of phase, phase change per second and oscillator tuning, as 12-second averages, with a strip showing when it was locked.
-7. **History.** 18 days of oscillator tuning and temperature and 12 hours of phase, read from the GPSDO's own memory: the end of each report line replays it, so the whole set arrives within 5 minutes of the display starting.
-8. **Events.** Lock lost and regained, GPS fix lost, no PPS, GPSDO and GPS restarts, antenna faults, Wi-Fi and MQTT drops, with UTC times. Kept across restarts of the display.
-9. **Network.** Wi-Fi, signal and channel, IP address, the NTP server's state, the MQTT broker and the address it was last looked up as, messages sent and the last error.
+4. **Stability.** The Allan deviation of the 10 MHz against GPS from 1 s to about 20 minutes, from up to an hour of continuous locked seconds, on a log-log plot. Short averaging times mostly show the GPS pulse's own jitter; longer ones show the oscillator and the loop. Below it, how the tuning has followed the oven temperature over the GPSDO's 18-day history, and the `tempRef`/`tempCoeff` that would compensate (shown only, never sent).
+5. **Sky.** Where the satellites are. Filled dots are used in the fix, rings are only in view; colour is signal strength.
+6. **Sky map.** Average signal strength by direction (10 by 10 degree cells), built up over days and kept across restarts. Weak or empty areas are where buildings or trees block the antenna's view.
+7. **Signal.** Signal strength per satellite, strongest first, with the antenna status the GPS reports and the average of the best four over 24 hours (a slowly failing antenna or cable shows here first).
+8. **Trends.** The last 30 minutes of phase, phase change per second and oscillator tuning, as 12-second averages, with a strip showing when it was locked.
+9. **History.** 18 days of oscillator tuning and temperature and 12 hours of phase, read from the GPSDO's own memory: the end of each report line replays it, so the whole set arrives within 5 minutes of the display starting.
+10. **Events.** Lock lost and regained, GPS fix lost, no PPS, GPSDO and GPS restarts, antenna faults, Wi-Fi and MQTT drops, with UTC times. Kept across restarts of the display.
+11. **Network.** Wi-Fi, signal and channel, IP address, the NTP server's state, the MQTT broker and the address it was last looked up as, messages sent and the last error.
 
 The bar along the bottom of every screen answers "can I trust the 10 MHz right now?": green **10 MHz OK** (GPSDO locked and the GPS has a good fix), amber **10 MHz UNCHECKED** (locked, but no GPS data to confirm it) or red **10 MHz UNRELIABLE**. It also shows how many seconds since each source last spoke, and the network state.
 
 The backlight dims in a dark room (the CYD's light sensor), and if a small speaker is plugged into the CYD's P4 connector it beeps three times when the 10 MHz becomes unreliable and once when it recovers.
+
+## GPS watch: jamming and spoofing
+
+Using only what the GPS already reports, the display watches for:
+
+- **Signal loss:** the four strongest satellites fall 10 dB or more below their usual level for 30 s (jamming, or the antenna or cable failing). Logged as an event.
+- **Spoofing signs:** the position moves more than 100 m from where this fixed antenna normally is (learned over its first 30 minutes of good fixes, kept on the device only); the GPS time steps against the display's own count of seconds; or many satellites are all strong and suspiciously equal. Any of these turns the verdict red, because a spoofed GPS cannot discipline the oscillator.
+
+After moving the antenna, type `forget position` on the console so it relearns.
 
 ## What the banner means
 

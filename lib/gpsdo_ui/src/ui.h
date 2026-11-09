@@ -27,9 +27,9 @@ struct UiExtras {
 
 class Ui {
 public:
-  static constexpr int kScreens = 9;
-  enum Screen { kStatus = 0, kTime = 1, kAccuracy = 2, kSky = 3, kBars = 4, kTrends = 5, kHistory = 6, kEvents = 7,
-                kNetwork = 8 };
+  static constexpr int kScreens = 11;
+  enum Screen { kStatus = 0, kTime = 1, kAccuracy = 2, kStability = 3, kSky = 4, kSkyMap = 5, kBars = 6, kTrends = 7,
+                kHistory = 8, kEvents = 9, kNetwork = 10 };
 
   void begin();
   // Refresh the visible screen from the monitor. Call about once a second.
@@ -60,6 +60,10 @@ private:
   void buildHistory();
   void updateHistory(const Monitor& m);
   void buildEvents();
+  void buildStability();
+  void updateStability(const Monitor& m);
+  void buildSkyMap();
+  void updateSkyMap(const Monitor& m);
   void updateEvents(const Monitor& m);
   void updateNetwork(const UiExtras& x);
   void updateStatus(const Monitor& m, uint32_t nowMs);
@@ -96,6 +100,13 @@ private:
   void* evText_[kEventRows] = {};
   void* evDot_[kEventRows] = {};
   void* evEmpty_ = nullptr;
+  // Stability
+  void* stabLine_ = nullptr;
+  void* stabDot_[10] = {};
+  void *stabNote_ = nullptr, *tempNote_ = nullptr, *stabEmpty_ = nullptr;
+  // Sky map
+  void *skyMapCanvas_ = nullptr, *skyMapNote_ = nullptr;
+  uint32_t skyMapSig_ = UINT32_MAX;
   // Signal screen extra line
   void* barsAntenna_ = nullptr;
   void *setup_ = nullptr, *setupNet_ = nullptr, *setupPass_ = nullptr, *setupUrl_ = nullptr, *setupStatus_ = nullptr,

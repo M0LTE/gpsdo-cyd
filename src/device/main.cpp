@@ -81,6 +81,33 @@ void saveEventsIfChanged(uint32_t now) {
   p.end();
 }
 
+// Sky map and the learned antenna position: saved hourly, restored at start-up. (The position stays
+// in the device's own flash; it is never published.)
+uint32_t lastLongSaveMs = 0;
+void loadLongTerm() {
+  Preferences p;
+  p.begin("gpsdo", true);
+  static uint8_t blob[SkyMap::kBlobSize];
+  if (p.getBytes("skymap", blob, sizeof blob) == sizeof blob) monitor.skyMap().fromBlob(blob, sizeof blob);
+  double pos[3];
+  if (p.getBytes("antpos", pos, sizeof pos) == sizeof pos) monitor.watch().restore(pos[0], pos[1], pos[2]);
+  p.end();
+  Serial.printf("# sky map restored, %u readings; antenna position %s\n", (unsigned)monitor.skyMap().samples(),
+                monitor.watch().positionLearned() ? "known" : "still to learn (30 min of fixes)");
+}
+void saveLongTerm(uint32_t now) {
+  if (ageMs(now, lastLongSaveMs) < 3600000UL) return;
+  lastLongSaveMs = now;
+  Preferences p;
+  p.begin("gpsdo", false);
+  static uint8_t blob[SkyMap::kBlobSize];
+  monitor.skyMap().toBlob(blob);
+  p.putBytes("skymap", blob, sizeof blob);
+  double pos[3];
+  if (monitor.watch().learned(pos[0], pos[1], pos[2])) p.putBytes("antpos", pos, sizeof pos);
+  p.end();
+}
+
 // Beep when the 10 MHz verdict changes (not at start-up).
 int lastVerdict = -1;  // 0 unreliable, 1 ok
 void beepOnVerdict() {
@@ -210,6 +237,15 @@ void pumpConsole() {
                     (unsigned)ESP.getMaxAllocHeap(), (unsigned)ESP.getMinFreeHeap());
       continue;
     }
+    if (l == "forget position") {  // after moving the antenna: learn its new position from scratch
+      monitor.watch() = InterferenceWatch();
+      Preferences p;
+      p.begin("gpsdo", false);
+      p.remove("antpos");
+      p.end();
+      Serial.println("# antenna position forgotten, relearning over 30 minutes of fixes");
+      continue;
+    }
     if (l == "clear events") { monitor.events() = EventLog(); Serial.println("# event log cleared"); continue; }
     if (l.size() < 2 || l[1] != ' ') continue;
     if (l[0] == 'N') monitor.onNanoLine(l.substr(2), millis());
@@ -270,6 +306,8 @@ void setup() {
   Backlight::begin();
   Beeper::begin();
   loadEvents();
+  loadLongTerm();
+  lastLongSaveMs = millis();
   settings.load();
   // Setup portal: when nothing is saved yet, or when the screen is held while the CYD starts.
   bool held = false;
@@ -316,6 +354,7 @@ void loop() {
     }
     beepOnVerdict();
     saveEventsIfChanged(now);
+    saveLongTerm(now);
     if (portal.active()) {
       ui.showSetup(portal.apSsid().c_str(), portal.apPass().c_str(), "http://192.168.4.1/", portal.status().c_str(),
                    portal.msLeft(now) / 1000);

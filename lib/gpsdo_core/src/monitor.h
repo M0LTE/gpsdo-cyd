@@ -9,6 +9,9 @@
 #include "arduino_report.h"
 #include "event_log.h"
 #include "history.h"
+#include "interference.h"
+#include "skymap.h"
+#include "stability.h"
 #include "nmea.h"
 #include "utc_clock.h"
 
@@ -34,6 +37,8 @@ enum Alarm : uint16_t {
   kAlarmGpsNoFix = 1 << 6,       // GGA quality 0 or GSA mode < 2
   kAlarmGpsFewSats = 1 << 7,     // fewer than 4 satellites used
   kAlarmRefSuspect = 1 << 8,     // GPSDO says Locked but the GPS has no good fix
+  kAlarmGpsSpoof = 1 << 9,       // position jump, time step or uniform signals: GPS not to be trusted
+  kAlarmGpsSignalLoss = 1 << 10, // best satellites suddenly 10 dB+ down: jamming or antenna trouble
 };
 
 // What the big banner says, in priority order.
@@ -118,6 +123,11 @@ public:
   uint32_t warmUpRemainingS() const;
 
   const NanoHistory& history() const { return history_; }
+  const Stability& stability() const { return stability_; }
+  SkyMap& skyMap() { return skyMap_; }
+  const SkyMap& skyMap() const { return skyMap_; }
+  InterferenceWatch& watch() { return watch_; }
+  const InterferenceWatch& watch() const { return watch_; }
   EventLog& events() { return events_; }
   const EventLog& events() const { return events_; }
   // Add an event stamped with the current UTC if known (used by the firmware for network events).
@@ -146,6 +156,11 @@ private:
   UtcClock clock_;
   int64_t lastPpsUs_ = 0;
   NanoHistory history_;
+  Stability stability_;
+  SkyMap skyMap_;
+  InterferenceWatch watch_;
+  uint32_t lastWatchMs_ = 0, lastSkyMs_ = 0, clockSteps_ = 0;
+  bool prevSpoof_ = false, prevSignalLoss_ = false;
   StatusLine status_;
   bool haveStatus_ = false;
   uint32_t statusMs_ = 0, missedSinceStart_ = 0, lastMissed_ = 0;

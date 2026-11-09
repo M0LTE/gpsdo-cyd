@@ -76,11 +76,17 @@ footer{color:var(--faint);font-size:12px;margin:20px 0}
 </section>
 
 <section class="two">
+ <div class="card"><h2>Stability (Allan deviation against GPS)</h2><svg id="adev" viewBox="0 0 400 210"></svg>
+  <div class="sub" id="adevNote"></div><div class="sub" id="tempNote" style="margin-top:6px"></div></div>
+ <div class="card"><h2>Sky map: average signal by direction</h2><svg id="skymap" viewBox="-110 -110 220 220"></svg><div class="sub" id="skymapNote"></div></div>
+</section>
+
+<section class="two">
  <div class="card"><h2>Frequency error</h2><table class="kv" id="acc"><tbody></tbody></table></div>
  <div class="card"><h2>GPSDO details</h2><table class="kv" id="details"><tbody></tbody></table></div>
 </section>
 
-<footer>Read-only. JSON: <a href="/api/state">state</a>, <a href="/api/events">events</a>, <a href="/api/trends">trends</a>, <a href="/api/history">history</a>, <a href="/api/sats">satellites</a>, <a href="/api/accuracy">accuracy</a>, <a href="/api/time">time and position</a>, <a href="/api/network">network</a>. Settings: hold the screen while the display starts up. <a href="https://github.com/M0LTE/gpsdo-cyd">Source</a>.</footer>
+<footer>Read-only. JSON: <a href="/api/state">state</a>, <a href="/api/events">events</a>, <a href="/api/trends">trends</a>, <a href="/api/history">history</a>, <a href="/api/sats">satellites</a>, <a href="/api/accuracy">accuracy</a>, <a href="/api/time">time and position</a>, <a href="/api/stability">stability</a>, <a href="/api/skymap">sky map</a>, <a href="/api/network">network</a>. Settings: hold the screen while the display starts up. <a href="https://github.com/M0LTE/gpsdo-cyd">Source</a>.</footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -158,7 +164,9 @@ async function state(){
  $('accSub').textContent=p!=null?`${s.freq_error_ppb_30min!=null?'30':'5'}-minute average, ${(Math.abs(p)*14).toFixed(2)} mHz at 14 MHz`:'needs locked running';
  kv('details',[['Firmware',s.firmware||'-'],['Time constant',s.tc_s?`${s.tc_s} s`:'-'],['Lock counter',s.lock_target?`${s.lock_counter} / ${s.lock_target}`:'-'],
   ['Missed PPS (total)',s.missed_pps_total??'-'],['Last missed PPS',s.since_missed_pps_s!=null?`${dur(s.since_missed_pps_s)} ago`:'-'],
-  ['Restarts seen',`GPSDO ${s.gpsdo_restarts}, GPS ${s.gps_restarts}`],['Alarms',s.alarms.length?s.alarms.join(', '):'none']]);
+  ['Restarts seen',`GPSDO ${s.gpsdo_restarts}, GPS ${s.gps_restarts}`],
+  ['GPS watch',(s.alarms.includes('gps_spoofing')?'SPOOFING SIGNS':'no spoofing signs')+', '+(s.alarms.includes('gps_signal_loss')?'SIGNAL LOSS':'signals normal')+(s.gps_position_learned?'':', still learning the antenna position')],
+  ['Damaged lines rejected',s.damaged_lines??0],['Alarms',s.alarms.length?s.alarms.join(', '):'none']]);
 }
 async function events(){
  const ev=await get('/api/events');
@@ -236,6 +244,32 @@ async function network(){
   ['Last error',n.last_error?`${dur(n.last_error_age_s)} ago: ${n.last_error}`:'none'],['Display up',dur(n.uptime_s)],['Free memory',`${Math.round(n.free_heap/1024)} KB`]]);
 }
 let netState='';
+async function stability(){
+ const d=await get('/api/stability');
+ const X=t=>40+350*Math.log10(t)/3,Y=a=>10+170*(-7-Math.log10(a))/5;
+ let g='';
+ for(let k=0;k<=5;k++){const y=10+170*k/5;g+=`<line x1="40" x2="390" y1="${y}" y2="${y}" stroke="${C.line}"/><text x="2" y="${y+3}" fill="#4a5563" font-size="9">1e${-7-k}</text>`}
+ [1,10,100,1000].forEach((t,k)=>{const x=X(t);g+=`<line x1="${x}" x2="${x}" y1="10" y2="180" stroke="${C.line}"/><text x="${x}" y="194" fill="#4a5563" font-size="9" text-anchor="middle">${t} s</text>`});
+ const pts=d.adev.map(([t,a])=>[X(t),Y(Math.max(1e-12,Math.min(1e-7,a)))]);
+ if(pts.length)g+=`<polyline points="${pts.map(p=>p.join(',')).join(' ')}" fill="none" stroke="${C.blue}" stroke-width="2"/>`+pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="${C.blue}"/>`).join('');
+ else g+=`<text x="215" y="100" fill="#4a5563" font-size="12" text-anchor="middle">needs a few minutes of locked data</text>`;
+ $('adev').innerHTML=g;
+ $('adevNote').textContent=`${Math.floor(d.samples/60)} min of continuous locked seconds (up to 60 kept). `+d.adev.map(([t,a])=>`${t} s: ${a.toExponential(1)}`).join(', ')+'. Short times show the GPS pulse jitter, long times the oscillator and loop.';
+ const t=d.temperature;
+ $('tempNote').textContent=t?`Temperature: the tuning moves ${t.slope_dac_per_c>0?'+':''}${t.slope_dac_per_c} counts per °C (${t.ppb_per_c} ppb/°C), which explains ${Math.round(t.r2*100)}% of its movement over ${t.points} locked 3-hour blocks spanning ${t.span_c} °C. Compensation would need tempRef ${t.temp_ref} and tempCoeff ${t.temp_coeff}. Not applied; best judged with the lid on.`:'Temperature fit: waiting for the GPSDO\'s 3-hour history.';
+}
+async function skymap(){
+ const d=await get('/api/skymap');
+ const R=100,rad=el=>R*(90-el)/90;
+ let g='';
+ for(const [e,a,v] of d.cells){const r1=rad(Math.min(90,e*10+10)),r2=rad(e*10),a1=(a*10-90)*Math.PI/180,a2=(a*10-80)*Math.PI/180;
+  const p=(r,ang)=>`${(r*Math.cos(ang)).toFixed(1)},${(r*Math.sin(ang)).toFixed(1)}`;
+  g+=`<path d="M${p(r2,a1)} A${r2},${r2} 0 0 1 ${p(r2,a2)} L${p(r1,a2)} A${r1},${r1} 0 0 0 ${p(r1,a1)} Z" fill="${snrCol(v)}" opacity=".85"/>`}
+ for(const r of[100,66.7,33.3])g+=`<circle r="${r}" fill="none" stroke="${C.line}"/>`;
+ for(const [t,x,y] of [['N',0,-102],['E',104,4],['S',0,110],['W',-110,4]])g+=`<text x="${x}" y="${y}" fill="#8b98a5" font-size="9" text-anchor="middle">${t}</text>`;
+ $('skymap').innerHTML=g;
+ $('skymapNote').textContent=`${d.samples} readings in ${d.cells.length} of 324 cells, built up over time and kept across restarts. Weak or empty areas are where the antenna's view of the sky is blocked.`;
+}
 async function accuracy(){
  const a=await get('/api/accuracy');
  const f=v=>v==null?'not enough locked data yet':`${v>0?'+':''}${v.toFixed(4)} ppb`;
@@ -246,7 +280,7 @@ async function accuracy(){
 }
 // One request at a time: the display is a small microcontroller, and a burst of parallel requests
 // from a page is what once ran its memory out.
-const tasks=[[state,2000],[timePos,5000],[events,5000],[sats,5000],[network,10000],[trends,12000],[accuracy,12000],[history,60000]].map(([fn,ms])=>({fn,ms,due:0}));
+const tasks=[[state,2000],[timePos,5000],[events,5000],[sats,5000],[network,10000],[trends,12000],[accuracy,12000],[stability,30000],[skymap,60000],[history,60000]].map(([fn,ms])=>({fn,ms,due:0}));
 async function scheduler(){
  for(;;){
   const now=Date.now();

@@ -80,6 +80,7 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
   if (m.frequencyPpb(300, ppb)) add(s, "freq_error_ppb_5min", "%.4f", ppb);
   add(s, "missed_pps_since_display", "%u", (unsigned)m.missedPpsSinceStart());
   add(s, "damaged_lines", "%u", (unsigned)m.damagedLines());
+  add(s, "gps_position_learned", "%s", tf(m.watch().positionLearned()));
   add(s, "gps_seen", "%s", tf(m.gpsEverSeen()));
   if (!m.gps().antennaStatus().empty()) {
     s += ",\"antenna\":";
@@ -99,6 +100,7 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
       {kAlarmNanoSilent, "gpsdo_silent"}, {kAlarmNoPps, "no_pps"},         {kAlarmMissing10MHz, "no_10mhz"},
       {kAlarmUnlocked, "unlocked"},       {kAlarmDacLimit, "dac_near_limit"}, {kAlarmGpsSilent, "gps_silent"},
       {kAlarmGpsNoFix, "gps_no_fix"},     {kAlarmGpsFewSats, "gps_few_sats"}, {kAlarmRefSuspect, "reference_suspect"},
+      {kAlarmGpsSpoof, "gps_spoofing"},   {kAlarmGpsSignalLoss, "gps_signal_loss"},
   };
   s += ",\"alarms\":[";
   bool first = true;

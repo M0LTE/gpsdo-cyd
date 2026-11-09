@@ -32,11 +32,20 @@ public:
     if (haveMark_ && markUs_ <= sentenceUs) m = markUs_;
     else if (havePrevMark_ && prevMarkUs_ <= sentenceUs) m = prevMarkUs_;
     if (m >= 0 && sentenceUs - m < 1000000) {
+      // With an anchor already in place, the second this mark should carry is known from the marks
+      // alone. If the GPS says otherwise its time has stepped (or been tampered with).
+      if (haveAnchor_ && m > anchorUs_ && m - anchorUs_ < 3600LL * 1000000) {
+        int64_t expected = anchorSec_ + (m - anchorUs_ + 500000) / 1000000;
+        if (expected != unixSec) ++steps_;
+      }
       anchorSec_ = unixSec;
       anchorUs_ = m;
       haveAnchor_ = true;
     }
   }
+
+  // How many times the GPS second has disagreed with the running count of second marks.
+  uint32_t steps() const { return steps_; }
 
   // Current UTC as microseconds since 1970. ppsAligned: the fraction comes from a recent second mark
   // (good to the mark's accuracy) rather than from NMEA alone (good to about 0.1 s).
@@ -57,6 +66,7 @@ public:
 private:
   int64_t markUs_ = 0, prevMarkUs_ = 0, nmeaUs_ = 0, nmeaSec_ = 0, anchorUs_ = 0, anchorSec_ = 0;
   bool haveMark_ = false, havePrevMark_ = false, haveNmea_ = false, haveAnchor_ = false;
+  uint32_t steps_ = 0;
 };
 
 // Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's algorithm).

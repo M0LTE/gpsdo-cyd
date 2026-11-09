@@ -4,6 +4,7 @@
 
 #include "age.h"
 #include "locator.h"
+#include "tempfit.h"
 
 namespace gpsdo {
 namespace {
@@ -158,6 +159,52 @@ void timeJson(const Monitor& m, int64_t nowUs, uint32_t nowMs, std::string& s) {
   std::snprintf(b, sizeof b, ",\"fix\":\"%s\",\"sats_used\":%u}", f.mode == 3 ? "3D" : f.mode == 2 ? "2D" : "none",
                 (unsigned)f.satsUsed);
   s += b;
+}
+
+}  // namespace gpsdo
+
+namespace gpsdo {
+
+void stabilityJson(const Monitor& m, int gain, std::string& s) {
+  char b[160];
+  std::snprintf(b, sizeof b, "{\"samples\":%u,\"adev\":[", (unsigned)m.stability().samples());
+  s = b;
+  bool first = true;
+  for (uint32_t tau : Stability::kTau) {
+    double a;
+    if (!m.stability().adev(tau, a)) continue;
+    std::snprintf(b, sizeof b, "%s[%u,%.3e]", first ? "" : ",", (unsigned)tau, a);
+    s += b;
+    first = false;
+  }
+  s += "]";
+  TempFit f = fitTemperature(m.history(), gain);
+  if (f.points) {
+    std::snprintf(b, sizeof b,
+                  ",\"temperature\":{\"points\":%d,\"slope_dac_per_c\":%.2f,\"ppb_per_c\":%.4f,\"r2\":%.2f,"
+                  "\"mean_c\":%.2f,\"span_c\":%.2f,\"temp_ref\":%ld,\"temp_coeff\":%ld,\"valid\":%s}",
+                  f.points, f.slopeDacPerC, f.ppbPerC, f.r2, f.meanTempC, f.tempSpanC, f.suggestedTempRef,
+                  f.suggestedTempCoeff, f.valid ? "true" : "false");
+    s += b;
+  }
+  s += "}";
+}
+
+void skyMapJson(const Monitor& m, std::string& s) {
+  const SkyMap& k = m.skyMap();
+  char b[48];
+  std::snprintf(b, sizeof b, "{\"samples\":%u,\"cells\":[", (unsigned)k.samples());
+  s = b;
+  bool first = true;
+  for (int e = 0; e < SkyMap::kEl; ++e)
+    for (int a = 0; a < SkyMap::kAz; ++a) {
+      float v = k.mean(e, a);
+      if (v < 0) continue;
+      std::snprintf(b, sizeof b, "%s[%d,%d,%.1f,%u]", first ? "" : ",", e, a, v, (unsigned)k.weight(e, a));
+      s += b;
+      first = false;
+    }
+  s += "]}";
 }
 
 }  // namespace gpsdo

@@ -71,3 +71,13 @@ After any power-off the GPSDO shows unlocked for at least 5 x its time constant 
 ## For a u-blox capture with a USB-serial adapter
 
 J1 (or J4) is also the place for a temporary 3.3 V USB-serial adapter: adapter **RX** to the GPS TXD pin, adapter GND to GND, and leave the adapter's TX unconnected so it only listens. The NEO-M8N's default is 9600 baud.
+
+## Optional: powering the CYD from the GPSDO's 12 V
+
+Not done on our unit yet; the CYD runs from a USB charger. If you want a single cable:
+
+- Take 12 V at the GPSDO's **DC inlet**, before its own regulators, through a **500 mA polyfuse** and a **ferrite bead with 22 uF** to ground, so the CYD's load steps do not reach the GPSDO's rails.
+- Run the 12 V out as a twisted pair with its ground, alongside the signal lead and away from the TIC area.
+- At the CYD end, make 5 V with a small switching module such as a **Recom R-78E5.0-1.0** or **Traco TSR 1-2450** (about 90% efficient, 1 A, no heatsink), with the input and output filter from its datasheet, and feed the CYD's **VIN and GND on P1**, not its USB socket.
+
+The switching regulator stays outside the GPSDO's metal case, away from the TIC and oscillator, and adds no heat inside the box: a linear 12-to-5 V regulator would burn about 2 W in there and shift the "ambient" the oven sees. The CYD needs about 1.5 W, roughly 0.13 A from 12 V.
