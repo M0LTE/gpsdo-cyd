@@ -304,8 +304,10 @@ async function accuracy(){
  const a=await get('/api/accuracy');
  const f=v=>v==null?'not enough locked data yet':`${v>0?'+':''}${v.toFixed(4)} ppb`;
  const rows=[['Over 1 minute',f(a['60'])],['Over 5 minutes',f(a['300'])],['Over 30 minutes',f(a['1800'])]];
- const p=a['1800'];
- if(p!=null)for(const mhz of[3.5,7,10,14,28,50,144])rows.push([`At ${mhz} MHz`,`${(Math.abs(p)*mhz).toFixed(2)} mHz`]);
+ // On-air offsets from the longest average available.
+ const w=['1800','300','60'].find(k=>a[k]!=null), p=w&&a[w];
+ const wn={'1800':'30-minute','300':'5-minute','60':'1-minute'}[w];
+ if(w)for(const mhz of[3.5,7,10,14,28,50,144])rows.push([`At ${mhz} MHz (${wn} figure)`,`${(Math.abs(p)*mhz).toFixed(2)} mHz`]);
  kv('acc',rows);
 }
 // One request at a time: the display is a small microcontroller, and a burst of parallel requests

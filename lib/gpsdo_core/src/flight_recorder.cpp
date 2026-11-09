@@ -21,7 +21,8 @@ void FlightRecorder::add(const FrSample& x) {
 void FlightRecorder::trigger(const char* reason, uint32_t unixSec) {
   if (active_) return;
   FrRecording& r = recs_[next_];
-  r = FrRecording();
+  // Clear in place: a temporary FrRecording (8 KB) overflowed the ESP32 loop task's stack.
+  std::memset(&r, 0, sizeof r);
   std::strncpy(r.reason, reason, sizeof r.reason - 1);
   r.triggerUnixSec = unixSec;
   // Copy the last 60 seconds, oldest first.
@@ -33,11 +34,13 @@ void FlightRecorder::trigger(const char* reason, uint32_t unixSec) {
 
 bool FlightRecorder::restore(const uint8_t* in, size_t len) {
   if (len != kBlobSize) return false;
-  FrRecording r;
+  FrRecording& r = recs_[next_];  // copied straight into place, never onto the stack (8 KB)
   std::memcpy(&r, in, sizeof r);
-  if (!r.valid || r.count > sizeof r.s / sizeof r.s[0]) return false;
+  if (!r.valid || r.count > sizeof r.s / sizeof r.s[0]) {
+    std::memset(&r, 0, sizeof r);
+    return false;
+  }
   r.reason[sizeof r.reason - 1] = 0;
-  recs_[next_] = r;
   next_ = (next_ + 1) % kKeep;
   if (done_ < kKeep) ++done_;
   return true;

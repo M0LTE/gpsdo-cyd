@@ -302,6 +302,9 @@ void pollTouch(uint32_t now) {
 
 }  // namespace
 
+// The default 8 KB loop stack left little headroom (a dropout recording once overflowed it).
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 void setup() {
   Serial.begin(CONSOLE_BAUD);
   Serial.println();

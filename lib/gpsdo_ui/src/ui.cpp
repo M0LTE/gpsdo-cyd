@@ -831,9 +831,9 @@ void Ui::buildAccuracy() {
   accBig_ = text(s, &lv_font_montserrat_28, kText, 8, 28, "--");
   accBigNote_ = text(s, &lv_font_montserrat_10, kDim, 8, 62, "");
   for (int i = 0; i < 3; ++i) accRow_[i] = text(s, &lv_font_montserrat_12, kText, 8, 82 + i * 17, "");
-  lv_obj_t* t = tile(s, 6, 136, kW - 12, kH - kFooterH - 140, "WHAT THAT MEANS ON AIR (30-MINUTE FIGURE)");
+  lv_obj_t* t = tile(s, 6, 136, kW - 12, kH - kFooterH - 140, "WHAT THE FIGURE ABOVE MEANS ON AIR");
   for (int i = 0; i < 6; ++i) {
-    accBand_[i] = text(t, &lv_font_montserrat_12, kText, 8 + (i % 3) * 100, 20 + (i / 3) * 18, "");
+    accBand_[i] = text(t, &lv_font_montserrat_12, kText, 8 + (i % 2) * 150, 18 + (i / 2) * 17, "");
   }
   accNote_ = text(s, &lv_font_montserrat_10, kFaint, 8, 0, "");
   lv_obj_add_flag(O(accNote_), LV_OBJ_FLAG_HIDDEN);
@@ -872,9 +872,9 @@ void Ui::updateAccuracy(const Monitor& m) {
     setColor(accRow_[i], have[i] ? kText : kFaint);
   }
   for (int i = 0; i < 6; ++i) {
-    if (have[2]) {
+    if (best >= 0) {  // the longest average available, as in the big figure
       char hz[24];
-      fmtHz(hz, sizeof hz, ppb[2] * 1e-9 * kBands[i].mhz * 1e6);
+      fmtHz(hz, sizeof hz, ppb[best] * 1e-9 * kBands[i].mhz * 1e6);
       std::snprintf(b, sizeof b, "%s %s", kBands[i].name, hz);
     } else {
       std::snprintf(b, sizeof b, "%s --", kBands[i].name);
@@ -1124,6 +1124,13 @@ void Ui::updateStability(const Monitor& m) {
 // ---------------------------------------------------------------- Sky map (long-term signal by direction)
 
 static constexpr int kMapSize = 150, kMapR = 72;
+static constexpr int kMapColors = 6;
+static const uint32_t kMapPalette[kMapColors] = {kBg, kPanel, kGreen, kLime, kAmber, kRed};
+static uint8_t mapIndex(uint32_t c) {
+  for (int i = 0; i < kMapColors; ++i)
+    if (kMapPalette[i] == c) return (uint8_t)i;
+  return 1;
+}
 
 static void freeCanvasBuf(lv_event_t* e) {
   lv_draw_buf_t* buf = static_cast<lv_draw_buf_t*>(lv_event_get_user_data(e));
@@ -1135,12 +1142,16 @@ void Ui::buildSkyMap() {
   screens_[kSkyMap] = s;
   text(s, &lv_font_montserrat_12, kText, 8, 6, "SKY MAP");
   text(s, &lv_font_montserrat_10, kFaint, 82, 8, "average signal by direction");
-  // The canvas buffer (45 KB) exists only while this screen is shown.
-  lv_draw_buf_t* buf = lv_draw_buf_create(kMapSize, kMapSize, LV_COLOR_FORMAT_RGB565, 0);
+  // The canvas exists only while this screen is shown. It uses a 16-colour palette (11 KB): a
+  // full-colour one (45 KB) often could not be allocated once the heap was fragmented.
+  lv_draw_buf_t* buf = lv_draw_buf_create(kMapSize, kMapSize, LV_COLOR_FORMAT_I4, 0);
   lv_obj_t* cv = lv_canvas_create(s);
   if (buf) {
     lv_canvas_set_draw_buf(cv, buf);
     lv_obj_add_event_cb(cv, freeCanvasBuf, LV_EVENT_DELETE, buf);
+    for (int i = 0; i < kMapColors; ++i) lv_canvas_set_palette(cv, i, lv_color32_make(kMapPalette[i] >> 16, (kMapPalette[i] >> 8) & 0xFF, kMapPalette[i] & 0xFF, 0xFF));
+  } else {
+    std::printf("# sky map: no memory for the picture\n");
   }
   lv_obj_set_pos(cv, 30, 34);
   skyMapCanvas_ = buf ? cv : nullptr;
@@ -1185,7 +1196,9 @@ void Ui::updateSkyMap(const Monitor& m) {
         float v = k.mean(el >= 90 ? SkyMap::kEl - 1 : el / 10, (az % 360) / 10);
         c = v < 0 ? kPanel : snrColor((int)v);
       }
-      lv_canvas_set_px(cv, x, y, lv_color_hex(c), LV_OPA_COVER);
+      lv_color_t idx{};
+      idx.blue = mapIndex(c);  // indexed canvases take the palette index in the blue channel
+      lv_canvas_set_px(cv, x, y, idx, LV_OPA_COVER);
     }
   lv_obj_invalidate(cv);
 }
