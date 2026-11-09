@@ -248,13 +248,16 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
     case Headline::Locked:
       bool known;
       fmtDuration(dur, sizeof dur, m.secondsLocked(nowMs, known));
-      if (m.missedPpsSinceStart())
-        std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s, %u missed pulse%s", dur, known ? "" : "+",
-                      (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es", (unsigned)m.missedPpsSinceStart(),
-                      m.missedPpsSinceStart() == 1 ? "" : "s");
-      else
-        std::snprintf(b, sizeof b, "for %s%s, %u lock loss%s", dur, known ? "" : "+",
-                      (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "es");
+      {
+        // One count at most, so the line fits the banner: lock losses matter more than missed pulses.
+        int k = std::snprintf(b, sizeof b, "for %s%s", dur, known ? "" : "+");
+        if (n.lockLosses())
+          std::snprintf(b + k, sizeof b - k, ", %u lock loss%s", (unsigned)n.lockLosses(),
+                        n.lockLosses() == 1 ? "" : "es");
+        else if (m.missedPpsSinceStart())
+          std::snprintf(b + k, sizeof b - k, ", %u missed pulse%s", (unsigned)m.missedPpsSinceStart(),
+                        m.missedPpsSinceStart() == 1 ? "" : "s");
+      }
       if (m.gpsdoRestarts() || m.gpsRestarts()) {
         char ago[24];
         fmtDuration(ago, sizeof ago, ageMs(nowMs, m.lastRestartMs()) / 1000);
@@ -497,11 +500,14 @@ void Ui::updateBars(const Monitor& m, uint32_t nowMs) {
     int lo, hi;
     size_t n = 0;
     a[0] = 0;
-    if (!ant.empty()) n += std::snprintf(a + n, sizeof a - n, "antenna %s", ant.c_str());
+    // One line only: the antenna is mentioned when it is anything but OK, and then the 24-hour
+    // range makes way for it.
+    bool antNote = !ant.empty() && ant != "OK";
+    if (antNote) n += std::snprintf(a + n, sizeof a - n, "antenna %s", NmeaParser::antennaWords(ant).c_str());
     if (m.top4Snr() >= 0) n += std::snprintf(a + n, sizeof a - n, "%sbest 4 average %d dB-Hz", n ? ", " : "", m.top4Snr());
-    if (m.top4Range(lo, hi)) std::snprintf(a + n, sizeof a - n, " (24 h: %d to %d)", lo, hi);
+    if (!antNote && m.top4Range(lo, hi)) std::snprintf(a + n, sizeof a - n, " (24 h: %d to %d)", lo, hi);
     setText(barsAntenna_, a);
-    setColor(barsAntenna_, (!ant.empty() && ant != "OK") ? kRed : kDim);
+    setColor(barsAntenna_, NmeaParser::antennaFault(ant) ? kRed : kDim);
   }
   for (int i = 0; i < kBarCount; ++i) {
     if (i >= (int)v.size()) {

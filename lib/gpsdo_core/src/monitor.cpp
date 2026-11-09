@@ -378,8 +378,8 @@ void Monitor::detectEvents(uint32_t nowMs) {
     prevSignalLoss_ = loss;
   }
   if (ant != prevAntenna_ && !ant.empty()) {
-    std::snprintf(b, sizeof b, "GPS antenna: %s", ant.c_str());
-    logEvent(nowMs, ant == "OK" ? 0 : 2, b);
+    std::snprintf(b, sizeof b, "GPS antenna: %s", NmeaParser::antennaWords(ant).c_str());
+    logEvent(nowMs, NmeaParser::antennaFault(ant) ? 2 : 0, b);
     prevAntenna_ = ant;
   }
 }

@@ -86,7 +86,7 @@ void test_events_and_antenna() {
   m.onGpsLine("$GNTXT,01,01,02,ANTSTATUS=SHORT*73", 69100);
   m.tick(69200);
   TEST_ASSERT_EQUAL_STRING("SHORT", m.gps().antennaStatus().c_str());
-  TEST_ASSERT_EQUAL_STRING("GPS antenna: SHORT", m.events().newest(0).text);
+  TEST_ASSERT_EQUAL_STRING("GPS antenna: short circuit", m.events().newest(0).text);
   // Saving and restoring the log keeps it intact.
   static uint8_t blob[EventLog::kBlobSize];
   m.events().toBlob(blob);

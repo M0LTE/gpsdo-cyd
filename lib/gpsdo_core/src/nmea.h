@@ -82,6 +82,17 @@ public:
   void restoreAntenna(const std::string& s) { if (antenna_.empty()) antenna_ = s; }
 
   static bool checksumOk(const std::string& s);
+  // The antenna status in plain words: the u-blox reports OK, OPEN, SHORT, DONTKNOW or INIT.
+  static std::string antennaWords(const std::string& raw) {
+    if (raw == "OK") return "OK";
+    if (raw == "OPEN") return "not connected";
+    if (raw == "SHORT") return "short circuit";
+    if (raw == "DONTKNOW") return "not checked";
+    if (raw == "INIT") return "being checked";
+    return raw;
+  }
+  // True only for a real antenna fault (not connected or shorted).
+  static bool antennaFault(const std::string& raw) { return raw == "OPEN" || raw == "SHORT"; }
 
 private:
   Satellite* findOrAdd(Constellation sys, uint16_t prn, uint32_t nowMs);

@@ -86,6 +86,8 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
   if (!m.gps().antennaStatus().empty()) {
     s += ",\"antenna\":";
     s += quoted(m.gps().antennaStatus());
+    s += ",\"antenna_text\":";
+    s += quoted(NmeaParser::antennaWords(m.gps().antennaStatus()));
   }
   if (m.gpsEverSeen()) {
     const NmeaParser& g = m.gps();
@@ -154,7 +156,7 @@ const Entity kEntities[] = {
     {"sensor", "sats_used", "Satellites used", "{{ value_json.sats_used }}", ",\"state_class\":\"measurement\",\"icon\":\"mdi:satellite-variant\""},
     {"sensor", "freq_error_ppb_30min", "Frequency error (30 min)", "{{ value_json.freq_error_ppb_30min }}",
      ",\"unit_of_measurement\":\"ppb\",\"state_class\":\"measurement\",\"suggested_display_precision\":4,\"icon\":\"mdi:sine-wave\""},
-    {"sensor", "antenna", "GPS antenna", "{{ value_json.antenna if value_json.antenna is defined else 'not reported yet' }}",
+    {"sensor", "antenna", "GPS antenna", "{{ value_json.antenna_text if value_json.antenna_text is defined else 'not reported yet' }}",
      ",\"icon\":\"mdi:antenna\""},
     {"sensor", "gpsdo_restarts", "GPSDO restarts", "{{ value_json.gpsdo_restarts }}", ",\"state_class\":\"total_increasing\",\"icon\":\"mdi:restart\""},
     {"sensor", "gps_restarts", "GPS restarts", "{{ value_json.gps_restarts }}", ",\"state_class\":\"total_increasing\",\"icon\":\"mdi:restart\""},

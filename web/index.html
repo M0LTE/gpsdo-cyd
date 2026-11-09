@@ -155,7 +155,7 @@ async function state(){
  if(s.dac!=null){const w=200,warn=w*3000/65535,x=4+(w-8)*s.dac/65535;
   $('dacBar').innerHTML=`<rect x="0" y="4" width="${w}" height="6" rx="3" fill="${C.grey}"/><rect x="0" y="4" width="${warn}" height="6" rx="3" fill="${C.red}"/><rect x="${w-warn}" y="4" width="${warn}" height="6" rx="3" fill="${C.red}"/><rect x="${x-1.5}" y="0" width="3" height="14" rx="1" fill="#e6edf3"/>`}
  $('gpsMain').textContent=s.gps_seen?(s.fix=='none'?'no fix':`${s.sats_used} satellites`):'no GPS data';
- $('gpsSub').textContent=s.gps_seen?`${s.fix} fix, ${s.sats_in_view} in view, HDOP ${s.hdop}`+(s.antenna?`, antenna ${s.antenna}`:''):'';
+ $('gpsSub').textContent=s.gps_seen?`${s.fix} fix, ${s.sats_in_view} in view, HDOP ${s.hdop}`+(s.antenna_text?`, antenna ${s.antenna_text}`:''):'';
  $('ticMain').textContent=s.tic_ns!=null?`${s.tic_ns} ns`:'-';
  $('ticSub').textContent=s.lock_test_tic_ns!=null?`lock test ${s.lock_test_tic_ns>0?'+':''}${s.lock_test_tic_ns} of ±100 ns`:'';
  $('dacMain').textContent=s.dac??'-';
@@ -201,7 +201,7 @@ async function sats(){
  $('sigTitle').textContent=s.length?`${d.in_view} in view, ${d.in_fix} in the fix`:'no satellites';
  $('skyLegend').textContent=Object.entries(d.constellations).map(([k,[u,v]])=>`${k} ${u}/${v}`).join(', ')+(s.length?' (in fix / in view)':'');
  $('antenna').textContent=[d.antenna?`antenna ${d.antenna}`:'',d.best4_snr!=null?`best 4 average ${d.best4_snr} dB-Hz`:'',d.best4_24h?`24 h: ${d.best4_24h[0]} to ${d.best4_24h[1]}`:''].filter(Boolean).join(', ');
- $('antenna').style.color=d.antenna&&d.antenna!='OK'?C.red:'';
+ $('antenna').style.color=d.antenna_fault?C.red:'';
  {const W=400,H=170,top=10,bot=140,max=55,n=Math.min(s.length,16),w=W/Math.max(n,1);let g='';
   for(const db of[20,30,40,50]){const y=bot-(bot-top)*db/max;g+=`<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="${C.line}"/><text x="2" y="${y-2}" fill="#4a5563" font-size="9">${db}</text>`}
   s.slice(0,n).forEach((x,i)=>{const v=Math.max(0,Math.min(max,x.snr)),h=Math.max(2,(bot-top)*v/max),cx=i*w+w*.2,bw=w*.6,c=snrCol(x.snr);

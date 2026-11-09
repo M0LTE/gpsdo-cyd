@@ -102,7 +102,8 @@ void satsJson(const Monitor& m, uint32_t nowMs, std::string& s) {
   s += "}";
   if (!g.antennaStatus().empty()) {
     s += ",\"antenna\":";
-    appendEscaped(s, g.antennaStatus().c_str());
+    appendEscaped(s, NmeaParser::antennaWords(g.antennaStatus()).c_str());
+    s += NmeaParser::antennaFault(g.antennaStatus()) ? ",\"antenna_fault\":true" : ",\"antenna_fault\":false";
   }
   if (m.top4Snr() >= 0) {
     std::snprintf(b, sizeof b, ",\"best4_snr\":%d", m.top4Snr());
