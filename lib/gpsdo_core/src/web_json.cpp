@@ -2,6 +2,9 @@
 
 #include <cstdio>
 
+#include "age.h"
+#include "locator.h"
+
 namespace gpsdo {
 namespace {
 void appendEscaped(std::string& o, const char* s) {
@@ -70,18 +73,46 @@ void historyJson(const Monitor& m, std::string& s) {
 
 void satsJson(const Monitor& m, uint32_t nowMs, std::string& s) {
   const NmeaParser& g = m.gps();
-  s = "[";
-  char b[120];
+  s = "{\"sats\":[";
+  char b[140];
   bool first = true;
+  unsigned seen[7] = {}, used[7] = {}, inView = 0, inFix = 0;
   for (const auto& sat : g.satellites()) {
     if (!sat.valid || sat.elevation < 0) continue;
+    bool u = g.isUsed(sat, nowMs);
+    ++seen[(int)sat.sys];
+    ++inView;
+    if (u) { ++used[(int)sat.sys]; ++inFix; }
     std::snprintf(b, sizeof b, "%s{\"id\":\"%s%02u\",\"el\":%d,\"az\":%d,\"snr\":%d,\"used\":%s}", first ? "" : ",",
-                  constellationPrefix(sat.sys), (unsigned)sat.prn, sat.elevation, sat.azimuth, sat.snr,
-                  g.isUsed(sat, nowMs) ? "true" : "false");
+                  constellationPrefix(sat.sys), (unsigned)sat.prn, sat.elevation, sat.azimuth, sat.snr, u ? "true" : "false");
     s += b;
     first = false;
   }
-  s += "]";
+  std::snprintf(b, sizeof b, "],\"in_view\":%u,\"in_fix\":%u,\"constellations\":{", inView, inFix);
+  s += b;
+  static const char* names[7] = {"Other", "GPS", "SBAS", "GLONASS", "Galileo", "BeiDou", "QZSS"};
+  first = true;
+  for (int i = 0; i < 7; ++i) {
+    if (!seen[i]) continue;
+    std::snprintf(b, sizeof b, "%s\"%s\":[%u,%u]", first ? "" : ",", names[i], used[i], seen[i]);
+    s += b;
+    first = false;
+  }
+  s += "}";
+  if (!g.antennaStatus().empty()) {
+    s += ",\"antenna\":";
+    appendEscaped(s, g.antennaStatus().c_str());
+  }
+  if (m.top4Snr() >= 0) {
+    std::snprintf(b, sizeof b, ",\"best4_snr\":%d", m.top4Snr());
+    s += b;
+  }
+  int lo, hi;
+  if (m.top4Range(lo, hi)) {
+    std::snprintf(b, sizeof b, ",\"best4_24h\":[%d,%d]", lo, hi);
+    s += b;
+  }
+  s += "}";
 }
 
 void accuracyJson(const Monitor& m, std::string& s) {
@@ -95,6 +126,38 @@ void accuracyJson(const Monitor& m, std::string& s) {
     s += b;
   }
   s += "}";
+}
+
+}  // namespace gpsdo
+
+namespace gpsdo {
+
+void timeJson(const Monitor& m, int64_t nowUs, uint32_t nowMs, std::string& s) {
+  char b[200];
+  int64_t u;
+  bool pps;
+  s = "{";
+  if (m.clock().now(nowUs, u, pps)) {
+    std::snprintf(b, sizeof b, "\"utc_ms\":%lld,\"pps_aligned\":%s", (long long)(u / 1000), pps ? "true" : "false");
+    s += b;
+  } else {
+    s += "\"utc_ms\":null";
+  }
+  const NmeaParser& g = m.gps();
+  const Fix& f = g.fix();
+  bool fresh = m.gpsEverSeen() && ageMs(nowMs, g.lastGoodMs()) <= Monitor::kSilentMs;
+  if (fresh && f.haveLatLon) {
+    std::snprintf(b, sizeof b, ",\"lat\":%.6f,\"lon\":%.6f,\"locator\":\"%s\"", f.latDeg, f.lonDeg,
+                  maidenhead(f.latDeg, f.lonDeg, 8).c_str());
+    s += b;
+    if (f.haveAltitude) {
+      std::snprintf(b, sizeof b, ",\"alt_m\":%.1f", f.altitudeM);
+      s += b;
+    }
+  }
+  std::snprintf(b, sizeof b, ",\"fix\":\"%s\",\"sats_used\":%u}", f.mode == 3 ? "3D" : f.mode == 2 ? "2D" : "none",
+                (unsigned)f.satsUsed);
+  s += b;
 }
 
 }  // namespace gpsdo

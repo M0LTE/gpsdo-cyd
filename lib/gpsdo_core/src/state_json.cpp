@@ -59,6 +59,7 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
     }
     uint32_t e = m.earliestLockS();
     if (e) add(s, "earliest_lock_s", "%u", (unsigned)e);
+    if (m.warmUpRemainingS()) add(s, "warmup_remaining_s", "%u", (unsigned)m.warmUpRemainingS());
   }
   if (m.msSinceNanoLine(nowMs) != UINT32_MAX) add(s, "gpsdo_age_s", "%u", (unsigned)(m.msSinceNanoLine(nowMs) / 1000));
   if (!n.revision().empty()) {
@@ -77,6 +78,8 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
   float ppb;
   if (m.frequencyPpb(1800, ppb)) add(s, "freq_error_ppb_30min", "%.4f", ppb);
   if (m.frequencyPpb(300, ppb)) add(s, "freq_error_ppb_5min", "%.4f", ppb);
+  add(s, "missed_pps_since_display", "%u", (unsigned)m.missedPpsSinceStart());
+  add(s, "damaged_lines", "%u", (unsigned)m.damagedLines());
   add(s, "gps_seen", "%s", tf(m.gpsEverSeen()));
   if (!m.gps().antennaStatus().empty()) {
     s += ",\"antenna\":";

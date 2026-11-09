@@ -152,7 +152,8 @@ private:
   bool haveMissedBase_ = false;
   EventLog events_;
   bool eventsArmed_ = false;
-  Headline prevHeadline_ = Headline::NoData;
+  Headline prevHeadline_ = Headline::NoData, headlineCandidate_ = Headline::NoData;
+  uint32_t headlineSinceMs_ = 0;
   bool prevGpsGood_ = false, gpsGoodCandidate_ = false;
   uint32_t gpsGoodSinceMs_ = 0;
   std::string prevAntenna_;

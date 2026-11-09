@@ -283,7 +283,7 @@ void setup() {
     portal.begin(settings);
   } else {
     net.begin(settings);
-    Web::begin(monitor);
+    Web::begin(monitor, net);
   }
   Serial.printf("# ready, free heap %u, largest block %u\n", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }

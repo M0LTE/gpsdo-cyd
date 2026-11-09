@@ -48,10 +48,16 @@ footer{color:var(--faint);font-size:12px;margin:20px 0}
 <div class="grid">
  <div class="tile"><h3>GPS</h3><div class="big" id="gpsMain">-</div><div class="sub" id="gpsSub"></div></div>
  <div class="tile"><h3>Phase vs GPS pulse</h3><div class="big" id="ticMain">-</div><div class="sub" id="ticSub"></div></div>
- <div class="tile"><h3>Oscillator tuning</h3><div class="big" id="dacMain">-</div><div class="sub" id="dacSub"></div></div>
+ <div class="tile"><h3>Oscillator tuning</h3><div class="big" id="dacMain">-</div><div class="sub" id="dacSub"></div><svg id="dacBar" viewBox="0 0 200 14" style="margin-top:6px;height:14px"></svg></div>
  <div class="tile"><h3>Oscillator temperature</h3><div class="big" id="tempMain">-</div><div class="sub" id="tempSub"></div></div>
  <div class="tile"><h3>10 MHz accuracy</h3><div class="big" id="accMain">-</div><div class="sub" id="accSub"></div></div>
 </div>
+
+<section class="two">
+ <div class="card"><h2>UTC</h2><div id="clock" style="font-size:44px;font-variant-numeric:tabular-nums;letter-spacing:1px">--:--:--.-</div>
+  <div class="sub" id="clockNote"></div><div class="sub" id="date"></div></div>
+ <div class="card"><h2>Position</h2><div class="big" id="locator">--------</div><div id="latlon" class="sub"></div><div id="alt" class="sub"></div></div>
+</section>
 
 <section class="card"><h2>Events (newest first, UTC)</h2><table id="events"><tbody></tbody></table></section>
 
@@ -60,8 +66,13 @@ footer{color:var(--faint);font-size:12px;margin:20px 0}
 <section><div class="charts" id="histCharts"></div><div class="sub" style="margin-top:4px" id="histNote"></div></section>
 
 <section class="two">
- <div class="card"><h2>Sky</h2><svg id="sky" viewBox="-110 -110 220 220"></svg></div>
- <div class="card"><h2>Satellites</h2><table id="sats"><thead><tr><th>Satellite</th><th>Signal dB-Hz</th><th>Elevation</th><th>Azimuth</th><th>In fix</th></tr></thead><tbody></tbody></table><div class="sub" id="antenna"></div></div>
+ <div class="card"><h2>Sky</h2><svg id="sky" viewBox="-110 -110 220 220"></svg><div class="sub" id="skyLegend"></div></div>
+ <div class="card"><h2>Signal strength, strongest first</h2><div class="sub" id="sigTitle"></div><svg id="bars" viewBox="0 0 400 170"></svg><div class="sub" id="antenna"></div></div>
+</section>
+
+<section class="two">
+ <div class="card"><h2>Satellites</h2><table id="sats"><thead><tr><th>Satellite</th><th>Signal dB-Hz</th><th>Elevation</th><th>Azimuth</th><th>In fix</th></tr></thead><tbody></tbody></table></div>
+ <div class="card"><h2>Network</h2><table class="kv" id="network"><tbody></tbody></table></div>
 </section>
 
 <section class="two">
@@ -69,7 +80,7 @@ footer{color:var(--faint);font-size:12px;margin:20px 0}
  <div class="card"><h2>GPSDO details</h2><table class="kv" id="details"><tbody></tbody></table></div>
 </section>
 
-<footer>Read-only. JSON: <a href="/api/state">state</a>, <a href="/api/events">events</a>, <a href="/api/trends">trends</a>, <a href="/api/history">history</a>, <a href="/api/sats">satellites</a>, <a href="/api/accuracy">accuracy</a>. Settings: hold the screen while the display starts up. <a href="https://github.com/M0LTE/gpsdo-cyd">Source</a>.</footer>
+<footer>Read-only. JSON: <a href="/api/state">state</a>, <a href="/api/events">events</a>, <a href="/api/trends">trends</a>, <a href="/api/history">history</a>, <a href="/api/sats">satellites</a>, <a href="/api/accuracy">accuracy</a>, <a href="/api/time">time and position</a>, <a href="/api/network">network</a>. Settings: hold the screen while the display starts up. <a href="https://github.com/M0LTE/gpsdo-cyd">Source</a>.</footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -112,18 +123,28 @@ async function state(){
  const s=await get('/api/state');
  const verdict=s.reference_ok?['ok','10 MHz OK']:(s.locked&&!s.gps_seen)?['unk','10 MHz UNCHECKED']:['bad','10 MHz UNRELIABLE'];
  $('strip').className='strip '+verdict[0];$('verdict').textContent=verdict[1];
- $('ages').textContent=`GPSDO ${s.gpsdo_age_s??'-'}s, GPS ${s.gps_age_s??'-'}s`;
+ $('ages').textContent=`GPSDO ${s.gpsdo_age_s??'-'}s, GPS ${s.gps_age_s??'-'}s`+(netState?`, ${netState}`:'');
  const col={'LOCKED':'ok','NO DATA':'none','UNLOCKED':'unk','WARM UP':'unk','HOLD':'unk'}[s.state]||'bad';
  $('banner').className='banner '+col;$('headline').textContent=s.state;document.title=`GPSDO ${s.state}`;
+ const ago=s.last_restart_age_s!=null&&s.last_restart_age_s<3600?dur(s.last_restart_age_s):null;
  let sub='';
- if(s.state=='LOCKED')sub=`for ${dur(s.locked_s)}, ${s.lock_losses} lock loss${s.lock_losses==1?'':'es'}`;
- else if(s.state=='GPS LOST')sub='GPSDO says locked, but the GPS has no good fix';
- else if(s.state=='NO PPS')sub='no pulse from the GPS, holding last tune';
- else if(s.lock_target)sub=`lock counter ${s.lock_counter} of ${s.lock_target+1} good seconds`+(s.earliest_lock_s?`, locks in ${dur(s.earliest_lock_s)} if it stays in`:'');
- else if(s.earliest_lock_s)sub=`earliest lock in ${dur(s.earliest_lock_s)}`;
+ if(s.state=='LOCKED'){sub=`for ${dur(s.locked_s)}, `+(ago?`restarted ${ago} ago`:`${s.lock_losses} lock loss${s.lock_losses==1?'':'es'}`);
+  if(s.missed_pps_since_display)sub+=`, ${s.missed_pps_since_display} missed pulse${s.missed_pps_since_display==1?'':'s'}`}
+ else if(s.state=='GPS LOST')sub='but the GPS has no good fix';
+ else if(s.state=='NO PPS')sub=ago?`restarted ${ago} ago, waiting for GPS`:'no GPS pulse, holding last tune';
+ else if(s.state=='NO 10 MHz')sub='no 10 MHz from the oscillator';
+ else if(s.state=='HOLD')sub='hold mode set by command';
+ else if(s.state=='WARM UP')sub=s.warmup_remaining_s?`start-up timer, ${dur(s.warmup_remaining_s)} to go`:'start-up timer';
+ else if(s.state=='UNLOCKED'){const off=s.lock_test_tic_ns??Math.round(s.tic_error_ns??0);
+  sub=`${off>0?'+':''}${off} ns off; `+(s.lock_target?`lock counter ${s.lock_counter} of ${s.lock_target+1}`+(s.earliest_lock_s?`, locks in ${dur(s.earliest_lock_s)} if it stays in`:''):(s.earliest_lock_s?`earliest lock in ${dur(s.earliest_lock_s)}`:'limit 100'))}
+ else sub=s.gpsdo_age_s!=null?'no report from the GPSDO':'waiting for the GPSDO';
  $('subline').textContent=sub;
- const prog=s.lock_target&&s.state!='LOCKED'?Math.min(1,s.lock_counter/(s.lock_target+1)):null;
- $('bar').hidden=prog==null;if(prog!=null)$('barfill').style.width=(prog*100).toFixed(1)+'%';
+ let prog=null;
+ if(s.state=='WARM UP'&&s.warmup_remaining_s!=null)prog=1-s.warmup_remaining_s/300;
+ else if(s.state=='UNLOCKED'&&s.lock_target)prog=Math.min(1,s.lock_counter/(s.lock_target+1));
+ $('bar').hidden=prog==null;if(prog!=null)$('barfill').style.width=(Math.max(0,prog)*100).toFixed(1)+'%';
+ if(s.dac!=null){const w=200,warn=w*3000/65535,x=4+(w-8)*s.dac/65535;
+  $('dacBar').innerHTML=`<rect x="0" y="4" width="${w}" height="6" rx="3" fill="${C.grey}"/><rect x="0" y="4" width="${warn}" height="6" rx="3" fill="${C.red}"/><rect x="${w-warn}" y="4" width="${warn}" height="6" rx="3" fill="${C.red}"/><rect x="${x-1.5}" y="0" width="3" height="14" rx="1" fill="#e6edf3"/>`}
  $('gpsMain').textContent=s.gps_seen?(s.fix=='none'?'no fix':`${s.sats_used} satellites`):'no GPS data';
  $('gpsSub').textContent=s.gps_seen?`${s.fix} fix, ${s.sats_in_view} in view, HDOP ${s.hdop}`+(s.antenna?`, antenna ${s.antenna}`:''):'';
  $('ticMain').textContent=s.tic_ns!=null?`${s.tic_ns} ns`:'-';
@@ -164,8 +185,19 @@ async function history(){
  $('histNote').textContent=`From the GPSDO's own memory (${h.seen_three_hour}/144 three-hour and ${h.seen_five_min}/144 five-minute entries received). Strip: locked for the whole 3 hours (green), not locked (red), restart or hold (amber).`;
 }
 async function sats(){
- const s=await get('/api/sats');
- s.sort((a,b)=>b.snr-a.snr);
+ const d=await get('/api/sats');const s=d.sats;
+ s.sort((a,b)=>b.snr-a.snr||b.used-a.used);
+ $('sigTitle').textContent=s.length?`${d.in_view} in view, ${d.in_fix} in the fix`:'no satellites';
+ $('skyLegend').textContent=Object.entries(d.constellations).map(([k,[u,v]])=>`${k} ${u}/${v}`).join(', ')+(s.length?' (in fix / in view)':'');
+ $('antenna').textContent=[d.antenna?`antenna ${d.antenna}`:'',d.best4_snr!=null?`best 4 average ${d.best4_snr} dB-Hz`:'',d.best4_24h?`24 h: ${d.best4_24h[0]} to ${d.best4_24h[1]}`:''].filter(Boolean).join(', ');
+ $('antenna').style.color=d.antenna&&d.antenna!='OK'?C.red:'';
+ {const W=400,H=170,top=10,bot=140,max=55,n=Math.min(s.length,16),w=W/Math.max(n,1);let g='';
+  for(const db of[20,30,40,50]){const y=bot-(bot-top)*db/max;g+=`<line x1="0" x2="${W}" y1="${y}" y2="${y}" stroke="${C.line}"/><text x="2" y="${y-2}" fill="#4a5563" font-size="9">${db}</text>`}
+  s.slice(0,n).forEach((x,i)=>{const v=Math.max(0,Math.min(max,x.snr)),h=Math.max(2,(bot-top)*v/max),cx=i*w+w*.2,bw=w*.6,c=snrCol(x.snr);
+   g+=`<rect x="${cx.toFixed(1)}" y="${(bot-h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${c}" fill-opacity="${x.used?1:.3}" stroke="${c}"/>`;
+   g+=`<text x="${(cx+bw/2).toFixed(1)}" y="${(bot-h-3).toFixed(1)}" fill="#e6edf3" font-size="9" text-anchor="middle">${x.snr<0?'-':x.snr}</text>`;
+   g+=`<text x="${(cx+bw/2).toFixed(1)}" y="${bot+13}" fill="${x.used?'#e6edf3':'#8b98a5'}" font-size="9" text-anchor="middle">${x.id}</text>`});
+  $('bars').innerHTML=g}
  $('sats').tBodies[0].innerHTML=s.map(x=>`<tr><td><span class="dot" style="background:${snrCol(x.snr)}"></span>${x.id}</td><td>${x.snr<0?'-':x.snr}</td><td>${x.el}°</td><td>${x.az}°</td><td>${x.used?'yes':''}</td></tr>`).join('');
  let g='';for(const r of[100,66.7,33.3])g+=`<circle r="${r}" fill="none" stroke="${C.line}"/>`;
  g+=`<line x1="0" y1="-100" x2="0" y2="100" stroke="${C.line}"/><line x1="-100" y1="0" x2="100" y2="0" stroke="${C.line}"/>`;
@@ -174,6 +206,36 @@ async function sats(){
   g+=`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4.5" fill="${x.used?c:'none'}" stroke="${c}" stroke-width="1.5"/><text x="${(px+6).toFixed(1)}" y="${(py+3).toFixed(1)}" fill="#e6edf3" font-size="7">${x.id}</text>`}
  $('sky').innerHTML=g;
 }
+let clockBase=null; // [utc ms, performance.now() at fetch, pps aligned]
+async function timePos(){
+ const t0=performance.now(),t=await get('/api/time'),t1=performance.now();
+ clockBase=t.utc_ms!=null?[t.utc_ms,(t0+t1)/2,t.pps_aligned]:null;
+ if(t.locator){$('locator').textContent=t.locator;$('latlon').textContent=`${Math.abs(t.lat).toFixed(5)} ${t.lat<0?'S':'N'}, ${Math.abs(t.lon).toFixed(5)} ${t.lon<0?'W':'E'}`;
+  $('alt').textContent=(t.alt_m!=null?`${t.alt_m} m above sea level, `:'')+`${t.fix} fix, ${t.sats_used} satellites`}
+ else{$('locator').textContent='--------';$('latlon').textContent='no fix';$('alt').textContent=''}
+}
+function tickClock(){
+ if(!clockBase){$('clock').textContent='--:--:--.-';$('clockNote').textContent='waiting for GPS time';return}
+ const ms=clockBase[0]+(performance.now()-clockBase[1]),d=new Date(ms);
+ const p=v=>String(v).padStart(2,'0');
+ $('clock').textContent=`${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.${Math.floor(d.getUTCMilliseconds()/100)}`;
+ $('date').textContent=`${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`;
+ $('clockNote').textContent=clockBase[2]?'seconds aligned to the GPS pulse (shown here to network accuracy)':'from GPS messages only, may lag up to 0.1 s';
+}
+setInterval(tickClock,100);
+async function network(){
+ const n=await get('/api/network');
+ const net=!n.wifi_enabled?'offline':!n.wifi_connected?'no Wi-Fi':!n.mqtt_connected?'no MQTT':'MQTT ok';
+ netState=net;
+ if(!n.wifi_enabled){kv('network',[['Wi-Fi','off (not set up)']]);return}
+ const q=n.rssi_dbm>=-60?'good':n.rssi_dbm>=-72?'fair':'weak';
+ kv('network',[['Wi-Fi',n.ssid+(n.wifi_connected?'':' (not connected)')],['Signal',n.wifi_connected?`${n.rssi_dbm} dBm (${q}), channel ${n.channel}`:'-'],
+  ['IP address',n.ip||'-'],['Name','gpsdo.local'],['MAC',n.mac||'-'],['NTP',`${n.ntp_synced?'stratum 1 (GPS)':'not synced'}, ${n.ntp_served} served`],
+  ['MQTT broker',`${n.mqtt_host}:${n.mqtt_port}`+(n.mqtt_ip?` (${n.mqtt_ip})`:'')],['MQTT',n.mqtt_connected?`connected for ${dur(n.mqtt_up_s)}`:'not connected'],
+  ['Published',n.last_publish_age_s!=null?`${n.published}, last ${n.last_publish_age_s}s ago, to gpsdo/state`:'-'],
+  ['Last error',n.last_error?`${dur(n.last_error_age_s)} ago: ${n.last_error}`:'none'],['Display up',dur(n.uptime_s)],['Free memory',`${Math.round(n.free_heap/1024)} KB`]]);
+}
+let netState='';
 async function accuracy(){
  const a=await get('/api/accuracy');
  const f=v=>v==null?'not enough locked data yet':`${v>0?'+':''}${v.toFixed(4)} ppb`;
@@ -184,7 +246,7 @@ async function accuracy(){
 }
 // One request at a time: the display is a small microcontroller, and a burst of parallel requests
 // from a page is what once ran its memory out.
-const tasks=[[state,2000],[events,5000],[sats,5000],[trends,12000],[accuracy,12000],[history,60000]].map(([fn,ms])=>({fn,ms,due:0}));
+const tasks=[[state,2000],[timePos,5000],[events,5000],[sats,5000],[network,10000],[trends,12000],[accuracy,12000],[history,60000]].map(([fn,ms])=>({fn,ms,due:0}));
 async function scheduler(){
  for(;;){
   const now=Date.now();

@@ -201,6 +201,20 @@ void test_spliced_lines_cannot_fake_lock() {
   TEST_ASSERT_TRUE(m.referenceOk());
 }
 
+void test_no_false_gps_lost_at_start() {
+  // At start-up other NMEA sentences arrive before the first fix report; that is "unknown", not
+  // "lost": no GPS LOST, and not green either until the fix is confirmed.
+  Monitor m;
+  m.onGpsLine("$GNRMC,132000.00,A,5200.00000,N,00100.00000,W,0.01,,081126,,,A,V*3D", 900);
+  m.onNanoLine(nanoLine(100, "Locked"), 1000);
+  TEST_ASSERT_FALSE(m.alarms() & kAlarmRefSuspect);
+  TEST_ASSERT_EQUAL(Headline::Locked, m.headline());
+  TEST_ASSERT_FALSE(m.referenceOk());
+  m.onGpsLine(kGga, 1100);
+  m.onNanoLine(nanoLine(101, "Locked"), 2000);
+  TEST_ASSERT_TRUE(m.referenceOk());
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_line_assembler);
@@ -213,6 +227,7 @@ int main() {
   RUN_TEST(test_earliest_lock_estimate);
   RUN_TEST(test_trend_ring);
   RUN_TEST(test_state_json);
+  RUN_TEST(test_no_false_gps_lost_at_start);
   RUN_TEST(test_long_silence_never_turns_green);
   RUN_TEST(test_spliced_lines_cannot_fake_lock);
   return UNITY_END();

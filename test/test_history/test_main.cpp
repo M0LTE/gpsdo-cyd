@@ -71,12 +71,17 @@ void test_events_and_antenna() {
     m.onNanoLine(b, 60000 + t * 1000);
   }
   TEST_ASSERT_EQUAL_INT(1, m.events().count());  // "Display started: LOCKED"
-  m.onNanoLine("5\t1\t30000\t44.0\t****\t0\t5000\t300\t150\t25191\t34.1\t", 65000);
+  // An unlock is logged once it has held for 3 s.
+  for (uint32_t t = 5; t <= 9; ++t) {
+    std::snprintf(b, sizeof b, "%u\t1\t30000\t44.0\t****\t0\t5000\t300\t150\t25191\t34.1\t", t);
+    m.onNanoLine(b, 60000 + t * 1000);
+    if (t == 6) TEST_ASSERT_EQUAL_INT(1, m.events().count());
+  }
   TEST_ASSERT_EQUAL_INT(2, m.events().count());
   TEST_ASSERT_EQUAL_STRING("GPSDO not locked", m.events().newest(0).text);
   TEST_ASSERT_EQUAL_UINT8(2, m.events().newest(0).level);
-  m.onGpsLine("$GNTXT,01,01,02,ANTSTATUS=SHORT*73", 65100);
-  m.tick(65200);
+  m.onGpsLine("$GNTXT,01,01,02,ANTSTATUS=SHORT*73", 69100);
+  m.tick(69200);
   TEST_ASSERT_EQUAL_STRING("SHORT", m.gps().antennaStatus().c_str());
   TEST_ASSERT_EQUAL_STRING("GPS antenna: SHORT", m.events().newest(0).text);
   // Saving and restoring the log keeps it intact.

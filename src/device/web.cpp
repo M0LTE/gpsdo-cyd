@@ -1,6 +1,7 @@
 #include "web.h"
 
 #include <WebServer.h>
+#include <esp_timer.h>
 
 #include <new>
 #include <string>
@@ -14,6 +15,7 @@ namespace Web {
 namespace {
 WebServer server(80);
 Monitor* mon = nullptr;
+Net* netp = nullptr;
 bool started = false;
 // The reply is built in one string reused between requests (it keeps its capacity, so after the
 // first few requests no new allocation is needed).
@@ -30,6 +32,55 @@ void sendJson(const std::string& body) {
 }
 
 uint32_t lowHeapSeen = UINT32_MAX;
+void appendStr(std::string& o, const std::string& v) {
+  o += '"';
+  for (char c : v) {
+    if (c == '"' || c == '\\') { o += '\\'; o += c; }
+    else if ((unsigned char)c < 0x20) o += ' ';
+    else o += c;
+  }
+  o += '"';
+}
+
+// What the network screen shows, as JSON. Passwords are never included.
+void networkJson(std::string& o) {
+  UiExtras x;
+  netp->fill(x);
+  char b[96];
+  o = "{\"hostname\":\"gpsdo\",\"wifi_enabled\":";
+  o += x.wifiEnabled ? "true" : "false";
+  o += ",\"wifi_connected\":";
+  o += x.wifiConnected ? "true" : "false";
+  o += ",\"ssid\":";
+  appendStr(o, x.ssid);
+  o += ",\"ip\":";
+  appendStr(o, x.ip);
+  o += ",\"mac\":";
+  appendStr(o, x.mac);
+  std::snprintf(b, sizeof b, ",\"rssi_dbm\":%d,\"channel\":%d,\"ntp_synced\":%s,\"ntp_served\":%u", x.rssi, x.channel,
+                x.ntpSynced ? "true" : "false", (unsigned)x.ntpRequests);
+  o += b;
+  o += ",\"mqtt_host\":";
+  appendStr(o, x.mqttHost);
+  o += ",\"mqtt_ip\":";
+  appendStr(o, x.mqttIp);
+  std::snprintf(b, sizeof b, ",\"mqtt_port\":%u,\"mqtt_connected\":%s,\"mqtt_up_s\":%u,\"published\":%u", (unsigned)x.mqttPort,
+                x.mqttConnected ? "true" : "false", (unsigned)x.mqttUpS, (unsigned)x.publishes);
+  o += b;
+  if (x.lastPublishAgeS != UINT32_MAX) {
+    std::snprintf(b, sizeof b, ",\"last_publish_age_s\":%u", (unsigned)x.lastPublishAgeS);
+    o += b;
+  }
+  if (!x.lastError.empty()) {
+    o += ",\"last_error\":";
+    appendStr(o, x.lastError);
+    std::snprintf(b, sizeof b, ",\"last_error_age_s\":%u", (unsigned)x.lastErrorAgeS);
+    o += b;
+  }
+  std::snprintf(b, sizeof b, ",\"free_heap\":%u,\"uptime_s\":%u}", (unsigned)ESP.getFreeHeap(), (unsigned)(millis() / 1000));
+  o += b;
+}
+
 template <class Build>
 void serveJson(Build build) {
   uint32_t freeNow = ESP.getFreeHeap();
@@ -49,8 +100,9 @@ void serveJson(Build build) {
 }
 }  // namespace
 
-void begin(Monitor& m) {
+void begin(Monitor& m, Net& net) {
   mon = &m;
+  netp = &net;
   server.on("/", HTTP_GET, [] {
     server.sendHeader("Content-Encoding", "gzip");
     server.sendHeader("Cache-Control", "no-cache");
@@ -62,6 +114,8 @@ void begin(Monitor& m) {
   server.on("/api/history", HTTP_GET, [] { serveJson([](std::string& o) { historyJson(*mon, o); }); });
   server.on("/api/sats", HTTP_GET, [] { serveJson([](std::string& o) { satsJson(*mon, millis(), o); }); });
   server.on("/api/accuracy", HTTP_GET, [] { serveJson([](std::string& o) { accuracyJson(*mon, o); }); });
+  server.on("/api/time", HTTP_GET, [] { serveJson([](std::string& o) { timeJson(*mon, esp_timer_get_time(), millis(), o); }); });
+  server.on("/api/network", HTTP_GET, [] { serveJson([](std::string& o) { networkJson(o); }); });
   server.onNotFound([] { server.send(404, "text/plain", "not found"); });
   server.begin();
   started = true;

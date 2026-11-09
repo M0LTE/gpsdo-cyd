@@ -189,15 +189,20 @@ void Monitor::tick(uint32_t nowMs) {
     // Only real fixes count: GPS (1), differential (2), RTK (4, 5). 6 is the receiver guessing
     // ("estimated", dead reckoning) and 0 is none.
     bool goodQuality = f.quality == 1 || f.quality == 2 || f.quality == 4 || f.quality == 5;
-    bool noFix = (f.haveGga && !goodQuality) || (f.haveGsa && f.mode < 2) || (!f.haveGga && !f.haveGsa);
+    // Until a GGA or GSA has arrived the fix is unknown, not missing: no alarm yet, but not "good"
+    // either (gpsGood below needs a known fix). Raising GPS LOST here gave a false red flash at
+    // every start-up, because other sentences arrive before the first fix report.
+    bool fixKnown = f.haveGga || f.haveGsa;
+    bool noFix = (f.haveGga && !goodQuality) || (f.haveGsa && f.mode < 2);
     if (noFix) a |= kAlarmGpsNoFix;
     uint8_t used = f.haveGga ? f.satsUsed : (uint8_t)nmea_.satsUsed(nowMs);
-    if (used < 4) a |= kAlarmGpsFewSats;
+    if (fixKnown && used < 4) a |= kAlarmGpsFewSats;
   }
   bool locked = nanoLive && nano_.locked();
-  bool gpsGood = gpsLive && !(a & (kAlarmGpsNoFix | kAlarmGpsFewSats));
+  bool gpsGood = gpsLive && nmea_.fix().haveGga && !(a & (kAlarmGpsNoFix | kAlarmGpsFewSats));
+  bool gpsUnknownYet = gpsLive && !nmea_.fix().haveGga && !nmea_.fix().haveGsa;
   // Only claim "suspect" when we have heard the GPS at all; before the tap is wired it is unknown.
-  if (locked && gpsSeen_ && !gpsGood) a |= kAlarmRefSuspect;
+  if (locked && gpsSeen_ && !gpsGood && !gpsUnknownYet) a |= kAlarmRefSuspect;
   referenceOk_ = locked && gpsGood && !(a & (kAlarmNoPps | kAlarmMissing10MHz));
   alarms_ = a;
 
@@ -283,7 +288,9 @@ void Monitor::detectEvents(uint32_t nowMs) {
   char b[48];
   if (gpsdoRestarts_ != prevGpsdoRestarts_) { prevGpsdoRestarts_ = gpsdoRestarts_; logEvent(nowMs, 2, "GPSDO restarted (power?)"); }
   if (gpsRestarts_ != prevGpsRestarts_) { prevGpsRestarts_ = gpsRestarts_; logEvent(nowMs, 2, "GPS module restarted"); }
-  if (headline_ != prevHeadline_) {
+  // A new state must hold for 3 s before it is logged, so a flicker cannot flood the log.
+  if (headline_ != headlineCandidate_) { headlineCandidate_ = headline_; headlineSinceMs_ = nowMs; }
+  if (headline_ != prevHeadline_ && ageMs(nowMs, headlineSinceMs_) >= 3000) {
     uint8_t level = headline_ == Headline::Locked ? 0 : (headline_ == Headline::WarmUp || headline_ == Headline::Holdover) ? 1 : 2;
     logEvent(nowMs, level, eventText(headline_));
     prevHeadline_ = headline_;
