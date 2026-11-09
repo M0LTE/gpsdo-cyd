@@ -117,6 +117,16 @@ void begin(Monitor& m, Net& net) {
   server.on("/api/time", HTTP_GET, [] { serveJson([](std::string& o) { timeJson(*mon, esp_timer_get_time(), millis(), o); }); });
   server.on("/api/stability", HTTP_GET, [] { serveJson([](std::string& o) { stabilityJson(*mon, 655, o); }); });
   server.on("/api/skymap", HTTP_GET, [] { serveJson([](std::string& o) { skyMapJson(*mon, o); }); });
+  server.on("/api/recordings", HTTP_GET, [] { serveJson([](std::string& o) { recordingsJson(*mon, o); }); });
+  server.on("/api/recording", HTTP_GET, [] {
+    // Streamed with chunked transfer: a recording is about 25 KB of JSON.
+    int i = server.hasArg("i") ? server.arg("i").toInt() : 0;
+    server.sendHeader("Cache-Control", "no-store");
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "application/json", "");
+    recordingJsonStream(*mon, i, [](const std::string& part) { server.sendContent(part.data(), part.size()); });
+    server.sendContent("");  // end of the chunked reply
+  });
   server.on("/api/network", HTTP_GET, [] { serveJson([](std::string& o) { networkJson(o); }); });
   server.onNotFound([] { server.send(404, "text/plain", "not found"); });
   server.begin();

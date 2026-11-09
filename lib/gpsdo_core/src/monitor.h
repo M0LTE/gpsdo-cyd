@@ -8,6 +8,7 @@
 
 #include "arduino_report.h"
 #include "event_log.h"
+#include "flight_recorder.h"
 #include "history.h"
 #include "interference.h"
 #include "skymap.h"
@@ -127,6 +128,8 @@ public:
   SkyMap& skyMap() { return skyMap_; }
   const SkyMap& skyMap() const { return skyMap_; }
   InterferenceWatch& watch() { return watch_; }
+  FlightRecorder& recorder() { return recorder_; }
+  const FlightRecorder& recorder() const { return recorder_; }
   const InterferenceWatch& watch() const { return watch_; }
   EventLog& events() { return events_; }
   const EventLog& events() const { return events_; }
@@ -159,6 +162,11 @@ private:
   Stability stability_;
   SkyMap skyMap_;
   InterferenceWatch watch_;
+  FlightRecorder recorder_;
+  uint32_t lastFrMs_ = 0, frFinishedSeen_ = 0;
+  bool frPrevGpsGood_ = false;
+  uint16_t frPrevAlarms_ = 0;
+  void recordSecond(uint32_t nowMs);
   uint32_t lastWatchMs_ = 0, lastSkyMs_ = 0, clockSteps_ = 0;
   bool prevSpoof_ = false, prevSignalLoss_ = false;
   StatusLine status_;

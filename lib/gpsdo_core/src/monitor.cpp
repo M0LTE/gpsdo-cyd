@@ -262,6 +262,43 @@ void Monitor::tick(uint32_t nowMs) {
     }
   }
   detectEvents(nowMs);
+  recordSecond(nowMs);
+}
+
+void Monitor::recordSecond(uint32_t nowMs) {
+  if (lastFrMs_ && ageMs(nowMs, lastFrMs_) < 1000) return;
+  lastFrMs_ = nowMs;
+  FrSample x{};
+  int64_t u;
+  bool pps;
+  x.unixSec = clock_.now((int64_t)nowMs * 1000, u, pps) ? (uint32_t)(u / 1000000) : 0;
+  const Fix& f = nmea_.fix();
+  x.used = f.satsUsed;
+  x.quality = f.quality;
+  x.best4 = (int8_t)top4_;
+  x.pps = nano_.haveData() && nano_.msSinceData(nowMs) <= 1500 && !(alarms_ & kAlarmNoPps);
+  for (const auto& sat : nmea_.satellites()) {
+    if (!sat.valid || sat.elevation < 0 || x.n >= 20) continue;
+    FrSat& o = x.sats[x.n++];
+    o.id = (uint16_t)((uint8_t)constellationPrefix(sat.sys)[0] << 8 | (sat.prn & 0xFF));
+    o.snr = sat.snr;
+    o.used = nmea_.isUsed(sat, nowMs);
+  }
+  recorder_.add(x);
+  // Start a recording when the GPS drops out: fix lost, PPS stopped, or a sudden signal drop.
+  bool gpsGood = gpsSeen_ && !(alarms_ & (kAlarmGpsSilent | kAlarmGpsNoFix | kAlarmGpsFewSats));
+  uint16_t rising = alarms_ & ~frPrevAlarms_;
+  if (frPrevGpsGood_ && !gpsGood) recorder_.trigger("GPS fix lost", x.unixSec);
+  else if (rising & kAlarmNoPps) recorder_.trigger("PPS stopped", x.unixSec);
+  else if (rising & kAlarmGpsSignalLoss) recorder_.trigger("signal drop", x.unixSec);
+  frPrevGpsGood_ = gpsGood;
+  frPrevAlarms_ = alarms_;
+  if (recorder_.finished() != frFinishedSeen_) {
+    frFinishedSeen_ = recorder_.finished();
+    char b[48];
+    std::snprintf(b, sizeof b, "GPS dropout recorded (%s)", recorder_.recording(0).reason);
+    logEvent(nowMs, 1, b);
+  }
 }
 
 void Monitor::logEvent(uint32_t nowMs, uint8_t level, const char* text) {

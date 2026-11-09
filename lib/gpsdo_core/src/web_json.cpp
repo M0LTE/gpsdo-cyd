@@ -208,3 +208,50 @@ void skyMapJson(const Monitor& m, std::string& s) {
 }
 
 }  // namespace gpsdo
+
+namespace gpsdo {
+
+void recordingsJson(const Monitor& m, std::string& s) {
+  const FlightRecorder& r = m.recorder();
+  char b[120];
+  s = "{\"recording_now\":";
+  s += r.recording() ? "true" : "false";
+  s += ",\"recordings\":[";
+  for (int i = 0; i < r.count(); ++i) {
+    const FrRecording& x = r.recording(i);
+    std::snprintf(b, sizeof b, "%s{\"index\":%d,\"t\":%u,\"seconds\":%u,\"trigger_index\":%u,\"reason\":", i ? "," : "", i,
+                  (unsigned)x.triggerUnixSec, (unsigned)x.count, (unsigned)x.triggerIndex);
+    s += b;
+    appendEscaped(s, x.reason);
+    s += "}";
+  }
+  s += "]}";
+}
+
+void recordingJsonStream(const Monitor& m, int index, const std::function<void(const std::string&)>& emit) {
+  const FlightRecorder& r = m.recorder();
+  if (index < 0 || index >= r.count()) { emit("null"); return; }
+  const FrRecording& x = r.recording(index);
+  char b[96];
+  std::string s;
+  std::snprintf(b, sizeof b, "{\"t\":%u,\"trigger_index\":%u,\"reason\":", (unsigned)x.triggerUnixSec, (unsigned)x.triggerIndex);
+  s = b;
+  appendEscaped(s, x.reason);
+  s += ",\"samples\":[";
+  emit(s);
+  for (int i = 0; i < x.count; ++i) {
+    const FrSample& q = x.s[i];
+    std::snprintf(b, sizeof b, "%s[%u,%u,%u,%d,%u,[", i ? "," : "", (unsigned)q.unixSec, q.used, q.quality, q.best4, q.pps);
+    s = b;
+    for (int k = 0; k < q.n && k < 20; ++k) {
+      std::snprintf(b, sizeof b, "%s[\"%c%02u\",%d,%u]", k ? "," : "", (char)(q.sats[k].id >> 8), (unsigned)(q.sats[k].id & 0xFF),
+                    q.sats[k].snr, q.sats[k].used);
+      s += b;
+    }
+    s += "]]";
+    emit(s);
+  }
+  emit("]}");
+}
+
+}  // namespace gpsdo

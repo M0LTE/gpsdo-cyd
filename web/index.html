@@ -61,6 +61,9 @@ footer{color:var(--faint);font-size:12px;margin:20px 0}
 
 <section class="card"><h2>Events (newest first, UTC)</h2><table id="events"><tbody></tbody></table></section>
 
+<section class="card"><h2>GPS dropout recordings</h2><div class="sub" id="recList">none yet</div>
+ <svg id="recChart" viewBox="0 0 900 260" style="margin-top:8px"></svg><div class="sub" id="recNote"></div></section>
+
 <section><div class="charts" id="trendCharts"></div><div class="sub" style="margin-top:4px">Last 30 minutes as 12-second averages. Strip: locked (green), partly (amber), not locked (red).</div></section>
 
 <section><div class="charts" id="histCharts"></div><div class="sub" style="margin-top:4px" id="histNote"></div></section>
@@ -86,7 +89,7 @@ footer{color:var(--faint);font-size:12px;margin:20px 0}
  <div class="card"><h2>GPSDO details</h2><table class="kv" id="details"><tbody></tbody></table></div>
 </section>
 
-<footer>Read-only. JSON: <a href="/api/state">state</a>, <a href="/api/events">events</a>, <a href="/api/trends">trends</a>, <a href="/api/history">history</a>, <a href="/api/sats">satellites</a>, <a href="/api/accuracy">accuracy</a>, <a href="/api/time">time and position</a>, <a href="/api/stability">stability</a>, <a href="/api/skymap">sky map</a>, <a href="/api/network">network</a>. Settings: hold the screen while the display starts up. <a href="https://github.com/M0LTE/gpsdo-cyd">Source</a>.</footer>
+<footer>Read-only. JSON: <a href="/api/state">state</a>, <a href="/api/events">events</a>, <a href="/api/trends">trends</a>, <a href="/api/history">history</a>, <a href="/api/sats">satellites</a>, <a href="/api/accuracy">accuracy</a>, <a href="/api/time">time and position</a>, <a href="/api/stability">stability</a>, <a href="/api/recordings">dropout recordings</a>, <a href="/api/skymap">sky map</a>, <a href="/api/network">network</a>. Settings: hold the screen while the display starts up. <a href="https://github.com/M0LTE/gpsdo-cyd">Source</a>.</footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -243,7 +246,34 @@ async function network(){
   ['Published',n.last_publish_age_s!=null?`${n.published}, last ${n.last_publish_age_s}s ago, to gpsdo/state`:'-'],
   ['Last error',n.last_error?`${dur(n.last_error_age_s)} ago: ${n.last_error}`:'none'],['Display up',dur(n.uptime_s)],['Free memory',`${Math.round(n.free_heap/1024)} KB`]]);
 }
-let netState='';
+let netState='',recShown=-1,recSig='';
+async function recordings(){
+ const d=await get('/api/recordings');
+ const sig=d.recordings.map(r=>r.t+r.reason).join('|');
+ if(!d.recordings.length){$('recList').textContent='None yet. When the GPS drops out (fix lost, pulse stopped or a sudden signal drop), the display keeps the 60 seconds before and 30 after.'+(d.recording_now?' Recording one now...':'');return}
+ $('recList').innerHTML=d.recordings.map(r=>`<a href="#" data-i="${r.index}">${when(r.t)} UTC: ${esc(r.reason)}</a>`).join(' &middot; ')+(d.recording_now?' (recording another now...)':'');
+ for(const a of $('recList').querySelectorAll('a'))a.onclick=e=>{e.preventDefault();showRecording(+a.dataset.i)};
+ if(sig!==recSig){recSig=sig;showRecording(0)}
+}
+async function showRecording(i){
+ const r=await get('/api/recording?i='+i);if(!r)return;recShown=i;
+ const W=900,H=230,L=40,T=10,n=r.samples.length,x=k=>L+(W-L-10)*k/Math.max(1,n-1),y=v=>T+(H-T-20)*(1-Math.max(0,Math.min(55,v))/55);
+ const series={};
+ r.samples.forEach((s,k)=>{for(const [id,snr,used] of s[5]){(series[id]=series[id]||[]).push([k,snr,used])}});
+ let g='';
+ for(const db of[10,20,30,40,50]){g+=`<line x1="${L}" x2="${W-10}" y1="${y(db)}" y2="${y(db)}" stroke="${C.line}"/><text x="4" y="${y(db)+3}" fill="#4a5563" font-size="10">${db}</text>`}
+ const tx=x(r.trigger_index);g+=`<line x1="${tx}" x2="${tx}" y1="${T}" y2="${H-20}" stroke="${C.red}" stroke-dasharray="4 3"/><text x="${tx+4}" y="${T+10}" fill="${C.red}" font-size="10">${esc(r.reason)}</text>`;
+ for(const [id,pts] of Object.entries(series)){let d='',pen=false;
+  for(const [k,snr] of pts){if(snr<0){pen=false;continue}d+=(pen?'L':'M')+x(k).toFixed(1)+' '+y(snr).toFixed(1);pen=true}
+  const used=pts.some(p=>p[2]);g+=`<path d="${d}" fill="none" stroke="${used?'#8cc63f':'#4a5563'}" stroke-width="${used?1.6:1}" opacity=".85"><title>${id}</title></path>`}
+ // satellites used (white) and PPS present (strip)
+ let du='';r.samples.forEach((s,k)=>{du+=(k?'L':'M')+x(k).toFixed(1)+' '+(T+(H-T-20)*(1-s[1]/20)).toFixed(1)});
+ g+=`<path d="${du}" fill="none" stroke="#e6edf3" stroke-width="2"/>`;
+ r.samples.forEach((s,k)=>{g+=`<rect x="${x(k).toFixed(1)}" y="${H-12}" width="${((W-L-10)/n+.6).toFixed(1)}" height="8" fill="${s[4]?C.green:C.red}"/>`});
+ g+=`<text x="${L}" y="${H+20}" fill="#4a5563" font-size="10">-${r.trigger_index} s</text><text x="${W-60}" y="${H+20}" fill="#4a5563" font-size="10">+${n-1-r.trigger_index} s</text>`;
+ $('recChart').innerHTML=g;
+ $('recNote').textContent=`${when(r.t)} UTC. Thin lines: each satellite's signal (dB-Hz, green if in the fix); white: satellites used (scale 0 to 20); strip: GPS pulse arriving (green) or not (red). All lines falling at once points at the antenna or receiver; a gradual sag across all of them at interference.`;
+}
 async function stability(){
  const d=await get('/api/stability');
  const X=t=>40+350*Math.log10(t)/3,Y=a=>10+170*(-7-Math.log10(a))/5;
@@ -280,7 +310,7 @@ async function accuracy(){
 }
 // One request at a time: the display is a small microcontroller, and a burst of parallel requests
 // from a page is what once ran its memory out.
-const tasks=[[state,2000],[timePos,5000],[events,5000],[sats,5000],[network,10000],[trends,12000],[accuracy,12000],[stability,30000],[skymap,60000],[history,60000]].map(([fn,ms])=>({fn,ms,due:0}));
+const tasks=[[state,2000],[timePos,5000],[events,5000],[sats,5000],[network,10000],[trends,12000],[accuracy,12000],[stability,30000],[skymap,60000],[history,60000],[recordings,15000]].map(([fn,ms])=>({fn,ms,due:0}));
 async function scheduler(){
  for(;;){
   const now=Date.now();

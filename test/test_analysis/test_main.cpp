@@ -1,10 +1,12 @@
 #include <unity.h>
 
 #include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include "flight_recorder.h"
 #include "interference.h"
 #include "skymap.h"
 #include "stability.h"
@@ -111,6 +113,30 @@ void test_clock_time_step() {
   TEST_ASSERT_EQUAL_UINT32(1, c.steps());
 }
 
+void test_flight_recorder() {
+  FlightRecorder r;
+  FrSample x{};
+  for (uint32_t t = 0; t < 100; ++t) {
+    x.unixSec = 1000 + t;
+    x.used = t < 80 ? 10 : 0;
+    r.add(x);
+    if (t == 80) r.trigger("GPS fix lost", x.unixSec);
+  }
+  TEST_ASSERT_EQUAL(0, r.count());  // still filling the 30 s after
+  for (uint32_t t = 100; t < 120; ++t) { x.unixSec = 1000 + t; r.add(x); }
+  TEST_ASSERT_EQUAL(1, r.count());
+  const FrRecording& rec = r.recording(0);
+  TEST_ASSERT_EQUAL_UINT16(90, rec.count);
+  TEST_ASSERT_EQUAL_UINT32(1080, rec.s[rec.triggerIndex].unixSec);
+  TEST_ASSERT_EQUAL_UINT32(1021, rec.s[0].unixSec);  // 60 s before, oldest first
+  TEST_ASSERT_EQUAL_STRING("GPS fix lost", rec.reason);
+  static uint8_t blob[FlightRecorder::kBlobSize];
+  std::memcpy(blob, &rec, sizeof rec);
+  FlightRecorder c;
+  TEST_ASSERT_TRUE(c.restore(blob, sizeof blob));
+  TEST_ASSERT_EQUAL(1, c.count());
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_adev_basics);
@@ -119,5 +145,6 @@ int main() {
   RUN_TEST(test_position_jump_is_spoofing);
   RUN_TEST(test_signal_loss_and_uniform);
   RUN_TEST(test_clock_time_step);
+  RUN_TEST(test_flight_recorder);
   return UNITY_END();
 }

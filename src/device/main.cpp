@@ -84,6 +84,7 @@ void saveEventsIfChanged(uint32_t now) {
 // Sky map and the learned antenna position: saved hourly, restored at start-up. (The position stays
 // in the device's own flash; it is never published.)
 uint32_t lastLongSaveMs = 0;
+uint32_t savedRecordings = 0;
 void loadLongTerm() {
   Preferences p;
   p.begin("gpsdo", true);
@@ -91,10 +92,25 @@ void loadLongTerm() {
   if (p.getBytes("skymap", blob, sizeof blob) == sizeof blob) monitor.skyMap().fromBlob(blob, sizeof blob);
   double pos[3];
   if (p.getBytes("antpos", pos, sizeof pos) == sizeof pos) monitor.watch().restore(pos[0], pos[1], pos[2]);
+  static uint8_t rec[FlightRecorder::kBlobSize];
+  if (p.getBytes("flightrec", rec, sizeof rec) == sizeof rec) monitor.recorder().restore(rec, sizeof rec);
   p.end();
+  savedRecordings = monitor.recorder().finished();
   Serial.printf("# sky map restored, %u readings; antenna position %s\n", (unsigned)monitor.skyMap().samples(),
                 monitor.watch().positionLearned() ? "known" : "still to learn (30 min of fixes)");
 }
+// The newest flight recording is saved once, as soon as it is complete.
+void saveRecordingIfNew() {
+  if (monitor.recorder().finished() == savedRecordings) return;
+  savedRecordings = monitor.recorder().finished();
+  const FrRecording& r = monitor.recorder().recording(0);
+  Preferences p;
+  p.begin("gpsdo", false);
+  size_t n = p.putBytes("flightrec", &r, sizeof r);
+  p.end();
+  Serial.printf("# flight recording saved (%s, %u s)%s\n", r.reason, (unsigned)r.count, n ? "" : " FAILED: flash full?");
+}
+
 void saveLongTerm(uint32_t now) {
   if (ageMs(now, lastLongSaveMs) < 3600000UL) return;
   lastLongSaveMs = now;
@@ -355,6 +371,7 @@ void loop() {
     beepOnVerdict();
     saveEventsIfChanged(now);
     saveLongTerm(now);
+    saveRecordingIfNew();
     if (portal.active()) {
       ui.showSetup(portal.apSsid().c_str(), portal.apPass().c_str(), "http://192.168.4.1/", portal.status().c_str(),
                    portal.msLeft(now) / 1000);

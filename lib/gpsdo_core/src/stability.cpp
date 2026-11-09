@@ -14,7 +14,7 @@ void Stability::add(uint32_t time, int32_t phaseNs, bool usable) {
   haveLast_ = true;
   lastTime_ = time;
   if (!usable) return;
-  x_[head_] = phaseNs;
+  x_[head_] = (int16_t)(phaseNs > 32767 ? 32767 : phaseNs < -32768 ? -32768 : phaseNs);
   head_ = (head_ + 1) % kSeconds;
   if (count_ < kSeconds) ++count_;
 }

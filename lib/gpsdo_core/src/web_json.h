@@ -1,6 +1,7 @@
 // JSON for the display's web page and API (/api/...). Plain C++, tested on a PC.
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "monitor.h"
@@ -18,6 +19,11 @@ void accuracyJson(const Monitor& m, std::string& out);
 void stabilityJson(const Monitor& m, int gain, std::string& out);
 // The long-term sky map: [el index, az index, mean SNR, weight] for each cell seen.
 void skyMapJson(const Monitor& m, std::string& out);
+// Flight recorder: a list of the recordings, and one recording in full.
+void recordingsJson(const Monitor& m, std::string& out);
+// One recording, written piece by piece through `emit` (it is ~25 KB, too big to build in one
+// string on the ESP32).
+void recordingJsonStream(const Monitor& m, int index, const std::function<void(const std::string&)>& emit);
 // UTC (from the PPS-aligned clock) and the GPS position. For the local web page only: the position
 // is never published over MQTT.
 void timeJson(const Monitor& m, int64_t nowUs, uint32_t nowMs, std::string& out);

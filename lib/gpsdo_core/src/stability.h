@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace gpsdo {
 
@@ -25,7 +26,8 @@ public:
 
 private:
   int32_t at(size_t i) const { return x_[(head_ + kSeconds - count_ + i) % kSeconds]; }
-  std::array<int32_t, kSeconds> x_{};
+  // Phase in ns while locked is a few hundred at most; int16 halves the memory. On the heap.
+  std::vector<int16_t> x_ = std::vector<int16_t>(kSeconds);
   size_t head_ = 0, count_ = 0;
   uint32_t lastTime_ = 0;
   bool haveLast_ = false;
