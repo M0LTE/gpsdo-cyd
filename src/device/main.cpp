@@ -332,7 +332,7 @@ void setup() {
   lv_tick_set_cb(tickCb);
   drawBuf = static_cast<uint8_t*>(heap_caps_malloc(kDrawBufBytes, MALLOC_CAP_DMA));
   lv_display_t* disp = lv_tft_espi_create(TFT_WIDTH, TFT_HEIGHT, drawBuf, kDrawBufBytes);
-  lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_90);  // matches the PCB silkscreen orientation
+  lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);  // as mounted (180 degrees from the PCB silkscreen)
   ui.begin();
   Serial.printf("# heap after screens %u\n", (unsigned)ESP.getFreeHeap());
 

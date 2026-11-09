@@ -69,6 +69,6 @@ A verified backup of the original flash and EEPROM, with restore instructions, i
 
 ## The display (CYD)
 
-- ESP32-2432S028R with two USB sockets but an ILI9341 panel (build `env:cyd`, not `cyd2usb`); the screen is rotated 90 degrees to match the board's printing.
+- ESP32-2432S028R with two USB sockets but an ILI9341 panel (build `env:cyd`, not `cyd2usb`); the screen is rotated 270 degrees (upside down relative to the board's printing) to suit how it is mounted.
 - ESP32-D0WD-V3, 4 MB flash.
 - Its light sensor reads 0 in a lit room; the dimming thresholds are still to be set from a dark-room reading.
