@@ -77,6 +77,9 @@ public:
   const std::string& lastTxt() const { return lastTxt_; }  // most recent $xxTXT text
   // Antenna supervisor state from "ANTSTATUS=..." notices (OK, SHORT, OPEN, ...); empty if never seen.
   const std::string& antennaStatus() const { return antenna_; }
+  // The GPS reports its antenna only at its own start and on a change, so a display restart would
+  // otherwise lose it. The device saves the last report and puts it back with this at boot.
+  void restoreAntenna(const std::string& s) { if (antenna_.empty()) antenna_ = s; }
 
   static bool checksumOk(const std::string& s);
 

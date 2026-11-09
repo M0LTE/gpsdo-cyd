@@ -105,9 +105,23 @@ void test_rmc_zda_txt() {
   TEST_ASSERT_EQUAL_STRING("u-blox AG - www.u-blox.com", p.lastTxt().c_str());
 }
 
+// A saved report is put back only while the GPS has not reported; a live report always wins.
+void test_antenna_restore() {
+  NmeaParser p;
+  p.restoreAntenna("OK");
+  TEST_ASSERT_EQUAL_STRING("OK", p.antennaStatus().c_str());
+  TEST_ASSERT_TRUE(p.parse("$GPTXT,01,01,02,ANTSTATUS=OPEN*2B", 0));
+  TEST_ASSERT_EQUAL_STRING("OPEN", p.antennaStatus().c_str());
+  p.restoreAntenna("OK");
+  TEST_ASSERT_EQUAL_STRING("OPEN", p.antennaStatus().c_str());
+  TEST_ASSERT_TRUE(p.parse("$GPTXT,01,01,02,ANTSTATUS=OK*3B", 0));
+  TEST_ASSERT_EQUAL_STRING("OK", p.antennaStatus().c_str());
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_checksum);
+  RUN_TEST(test_antenna_restore);
   RUN_TEST(test_gga);
   RUN_TEST(test_multipart_gsv_with_empty_snr_and_sbas);
   RUN_TEST(test_legacy_gsv_without_signal_id);

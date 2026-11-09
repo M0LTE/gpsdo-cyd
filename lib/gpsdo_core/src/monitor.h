@@ -93,6 +93,7 @@ public:
   // after a serial buffer overflow can join two half-lines into something that looks valid.
   uint32_t damagedLines() const { return damagedLines_; }
   const NmeaParser& gps() const { return nmea_; }
+  void restoreAntenna(const std::string& s) { nmea_.restoreAntenna(s); }
   bool gpsEverSeen() const { return gpsSeen_; }
 
   // Start-ups seen while the display has been running: the Nano's banner, and the u-blox's
