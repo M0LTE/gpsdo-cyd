@@ -60,7 +60,10 @@ void test_frequency_estimate() {
   float ppb;
   TEST_ASSERT_TRUE(m.frequencyPpb(300, ppb));
   TEST_ASSERT_FLOAT_WITHIN(0.02f, 0.1f, ppb);
-  TEST_ASSERT_FALSE(m.frequencyPpb(3600, ppb));  // only 30 minutes are kept
+  // The 30-minute figure must be available once 30 minutes are stored (it never was: 150 blocks
+  // only span 149 gaps).
+  TEST_ASSERT_TRUE(m.frequencyPpb(1800, ppb));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.1f, ppb);
 }
 
 void test_events_and_antenna() {

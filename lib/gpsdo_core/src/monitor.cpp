@@ -386,6 +386,9 @@ void Monitor::detectEvents(uint32_t nowMs) {
 
 bool Monitor::frequencyPpb(uint32_t seconds, float& ppb) const {
   size_t w = seconds / kTrendStepS;
+  // The store holds kTrendPoints blocks, so the full 30 minutes spans kTrendPoints - 1 gaps
+  // (29.8 min). Without this cap the 30-minute figure could never be produced.
+  if (w >= kTrendPoints) w = kTrendPoints - 1;
   if (w == 0 || trendCount_ < w + 1) return false;
   const TrendPoint& a = trend(trendCount_ - 1 - w);
   const TrendPoint& b = trend(trendCount_ - 1);
