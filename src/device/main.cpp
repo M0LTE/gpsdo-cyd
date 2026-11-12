@@ -377,11 +377,13 @@ void updateClockDigits(int64_t nowUs) {
     return;
   }
   int64_t boundary = unixUs - unixUs % 100000 + 100000;
+  if (unixUs < clockShownUntil - 200000) clockShownUntil = 0;  // time stepped back: redraw now
   if (unixUs >= clockShownUntil) ui.fastUpdate(monitor, nowUs);  // missed an edge: catch up now
   if (boundary <= clockShownUntil) return;                        // next tenth already drawn
   int64_t toNext = boundary - unixUs;
   if (toNext > clockLeadUs + 8000) return;  // not yet; the loop comes round every few ms
   int64_t startAt = nowUs + toNext - clockLeadUs;
+  lv_refr_now(nullptr);  // get any other pending redraws out of the way first
   while (esp_timer_get_time() < startAt) {
   }
   int64_t t0 = esp_timer_get_time();
