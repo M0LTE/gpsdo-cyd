@@ -54,6 +54,10 @@ bool wasTouched = false;
 uint32_t lastTouchMs = 0;
 uint8_t prevGpsByte = 0;
 uint32_t lastFastMs = 0;
+// The time screen's digits are drawn ahead of each tenth of a second and pushed to the panel
+// so they finish arriving on the boundary, rather than up to ~50 ms after it.
+int64_t clockLeadUs = 5000;     // how long a forced redraw of the digits takes (smoothed)
+int64_t clockShownUntil = 0;    // unix us: digits already show the tenth starting here
 
 // Event log persistence: saved to flash a few seconds after it changes.
 uint32_t savedChanges = 0, lastSaveMs = 0;
@@ -361,6 +365,35 @@ void setup() {
 
 bool resetReasonLogged = false;
 
+void updateClockDigits(int64_t nowUs) {
+  int64_t unixUs;
+  bool aligned;
+  if (ui.current() != Ui::kTime || !monitor.clock().now(nowUs, unixUs, aligned)) {
+    clockShownUntil = 0;
+    if (millis() - lastFastMs >= 50) {
+      lastFastMs = millis();
+      ui.fastUpdate(monitor, nowUs);
+    }
+    return;
+  }
+  int64_t boundary = unixUs - unixUs % 100000 + 100000;
+  if (unixUs < clockShownUntil - 200000) clockShownUntil = 0;  // time stepped back: redraw now
+  if (unixUs >= clockShownUntil) ui.fastUpdate(monitor, nowUs);  // missed an edge: catch up now
+  if (boundary <= clockShownUntil) return;                        // next tenth already drawn
+  int64_t toNext = boundary - unixUs;
+  if (toNext > clockLeadUs + 8000) return;  // not yet; the loop comes round every few ms
+  int64_t startAt = nowUs + toNext - clockLeadUs;
+  lv_refr_now(nullptr);  // get any other pending redraws out of the way first
+  while (esp_timer_get_time() < startAt) {
+  }
+  int64_t t0 = esp_timer_get_time();
+  ui.fastUpdate(monitor, nowUs + toNext + 1000);  // the tenth that starts at the boundary
+  lv_refr_now(nullptr);
+  int64_t took = esp_timer_get_time() - t0;
+  if (took > 0 && took < 40000) clockLeadUs += (took - clockLeadUs) / 8;
+  clockShownUntil = boundary;
+}
+
 void loop() {
   Watchdog::feed();
   pumpUart(nanoSerial, nanoLines, false);
@@ -446,10 +479,7 @@ void loop() {
   } else {
     NtpServer::setUnsynced();
   }
-  if (now - lastFastMs >= 50) {
-    lastFastMs = now;
-    ui.fastUpdate(monitor, nowUs);
-  }
+  updateClockDigits(nowUs);
   lv_timer_handler();
   delay(5);
 }
