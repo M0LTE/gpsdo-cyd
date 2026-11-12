@@ -57,7 +57,10 @@ uint32_t lastFastMs = 0;
 // The time screen's digits are drawn ahead of each tenth of a second and pushed to the panel
 // so they finish arriving on the boundary, rather than up to ~50 ms after it.
 int64_t clockLeadUs = 5000;     // how long a forced redraw of the digits takes (smoothed)
-int64_t clockShownUntil = 0;    // unix us: digits already show the tenth starting here
+int64_t clockShownUntil = 0;
+// The LCD's pixels take this long to visibly change after they are written (TN panel response
+// plus scan-out), so the digits are drawn this much early. Set by filming against an LED clock.
+const int64_t kPanelLagUs = 15000;    // unix us: digits already show the tenth starting here
 
 // Event log persistence: saved to flash a few seconds after it changes.
 uint32_t savedChanges = 0, lastSaveMs = 0;
@@ -381,8 +384,8 @@ void updateClockDigits(int64_t nowUs) {
   if (unixUs >= clockShownUntil) ui.fastUpdate(monitor, nowUs);  // missed an edge: catch up now
   if (boundary <= clockShownUntil) return;                        // next tenth already drawn
   int64_t toNext = boundary - unixUs;
-  if (toNext > clockLeadUs + 8000) return;  // not yet; the loop comes round every few ms
-  int64_t startAt = nowUs + toNext - clockLeadUs;
+  if (toNext > clockLeadUs + kPanelLagUs + 8000) return;  // not yet; the loop comes round every few ms
+  int64_t startAt = nowUs + toNext - clockLeadUs - kPanelLagUs;
   lv_refr_now(nullptr);  // get any other pending redraws out of the way first
   while (esp_timer_get_time() < startAt) {
   }
