@@ -60,7 +60,7 @@ int64_t clockLeadUs = 5000;     // how long a forced redraw of the digits takes 
 int64_t clockShownUntil = 0;
 // The LCD's pixels take this long to visibly change after they are written (TN panel response
 // plus scan-out), so the digits are drawn this much early. Set by filming against an LED clock.
-const int64_t kPanelLagUs = 15000;    // unix us: digits already show the tenth starting here
+const int64_t kPanelLagUs = 10000;    // unix us: digits already show the tenth starting here
 
 // Event log persistence: saved to flash a few seconds after it changes.
 uint32_t savedChanges = 0, lastSaveMs = 0;
