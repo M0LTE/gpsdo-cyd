@@ -19,6 +19,7 @@
 
 #include "backlight.h"
 #include "config.h"
+#include "flash_log.h"
 #include "line_assembler.h"
 #include "age.h"
 #include "monitor.h"
@@ -62,30 +63,60 @@ int64_t clockShownUntil = 0;
 // plus scan-out), so the digits are drawn this much early. Set by filming against an LED clock.
 const int64_t kPanelLagUs = 10000;    // unix us: digits already show the tenth starting here
 
-// Event log persistence: saved to flash a few seconds after it changes.
-uint32_t savedChanges = 0, lastSaveMs = 0;
+// Event log persistence: each new event is appended to a circular log in flash (FlashLog), a few
+// seconds after it happens. The newest EventLog::kSize are reloaded at start-up. "clear events"
+// stores the sequence number it cleared up to, so nothing has to be erased.
+uint32_t savedChanges = 0, lastSaveMs = 0, eventsClearedSeq = 0;
 void loadEvents() {
   Preferences p;
-  p.begin("gpsdo", true);
-  static uint8_t blob[EventLog::kBlobSize];
-  size_t n = p.getBytes("events", blob, sizeof blob);
+  p.begin("gpsdo", false);
+  eventsClearedSeq = p.getUInt("evclear", 0);
+  gpsdo::RingStore* ring = FlashLog::events();
+  // One-off move from the old whole-log blob in NVS, which filled NVS up; then free its space.
+  if (p.isKey("events")) {
+    static uint8_t blob[EventLog::kBlobSize];
+    EventLog old;
+    if (ring && ring->nextSeq() == 1 && p.getBytes("events", blob, sizeof blob) == sizeof blob && old.fromBlob(blob, sizeof blob))
+      for (int i = old.count() - 1; i >= 0; i--) ring->append(&old.newest(i), sizeof(Event));
+    p.remove("events");
+  }
   p.end();
-  if (n == sizeof blob && monitor.events().fromBlob(blob, n)) Serial.printf("# event log restored, %d entries\n", monitor.events().count());
+  if (ring) {
+    Event e[EventLog::kSize];
+    int n = 0;
+    uint32_t seq;
+    while (n < EventLog::kSize && ring->newest(n, &e[n], sizeof e[n], &seq) == (int)sizeof(Event) && seq > eventsClearedSeq) {
+      e[n].text[sizeof e[n].text - 1] = 0;
+      ++n;
+    }
+    for (int i = n - 1; i >= 0; i--) monitor.events().add(e[i].unixSec, e[i].upS, e[i].level, e[i].text);
+    if (n) Serial.printf("# event log restored, %d entries\n", n);
+  }
   savedChanges = monitor.events().changes();
 }
 void saveEventsIfChanged(uint32_t now) {
-  if (monitor.events().changes() == savedChanges) return;
-  // Save soon after a serious event, otherwise at most once a minute, to spare the flash.
+  uint32_t fresh = monitor.events().changes() - savedChanges;
+  if (!fresh) return;
+  // Save soon after a serious event, otherwise at most once a minute, to batch the writes.
   bool serious = monitor.events().count() && monitor.events().newest(0).level == 2;
   if (ageMs(now, lastSaveMs) < (serious ? 10000u : 60000u)) return;
   lastSaveMs = now;
   savedChanges = monitor.events().changes();
-  static uint8_t blob[EventLog::kBlobSize];
-  monitor.events().toBlob(blob);
-  Preferences p;
-  p.begin("gpsdo", false);
-  p.putBytes("events", blob, sizeof blob);
-  p.end();
+  gpsdo::RingStore* ring = FlashLog::events();
+  if (!ring) return;
+  int n = (int)fresh < monitor.events().count() ? (int)fresh : monitor.events().count();
+  for (int i = n - 1; i >= 0; i--) ring->append(&monitor.events().newest(i), sizeof(Event));
+}
+void clearEvents() {
+  monitor.events() = EventLog();
+  savedChanges = monitor.events().changes();
+  if (FlashLog::events()) {
+    eventsClearedSeq = FlashLog::events()->nextSeq() - 1;
+    Preferences p;
+    p.begin("gpsdo", false);
+    p.putUInt("evclear", eventsClearedSeq);
+    p.end();
+  }
 }
 
 // Sky map and the learned antenna position: saved hourly, restored at start-up. (The position stays
@@ -93,6 +124,7 @@ void saveEventsIfChanged(uint32_t now) {
 uint32_t lastLongSaveMs = 0;
 uint32_t savedRecordings = 0;
 std::string savedAntenna;  // last antenna report from the GPS, kept across display restarts
+void loadRecordings();
 void loadLongTerm() {
   Preferences p;
   p.begin("gpsdo", true);
@@ -100,25 +132,45 @@ void loadLongTerm() {
   if (p.getBytes("skymap", blob, sizeof blob) == sizeof blob) monitor.skyMap().fromBlob(blob, sizeof blob);
   double pos[3];
   if (p.getBytes("antpos", pos, sizeof pos) == sizeof pos) monitor.watch().restore(pos[0], pos[1], pos[2]);
-  static uint8_t rec[FlightRecorder::kBlobSize];
-  if (p.getBytes("flightrec", rec, sizeof rec) == sizeof rec) monitor.recorder().restore(rec, sizeof rec);
   savedAntenna = p.getString("antenna", "").c_str();
   if (!savedAntenna.empty()) monitor.restoreAntenna(savedAntenna);
   p.end();
+  loadRecordings();
   savedRecordings = monitor.recorder().finished();
   Serial.printf("# sky map restored, %u readings; antenna position %s\n", (unsigned)monitor.skyMap().samples(),
                 monitor.watch().positionLearned() ? "known" : "still to learn (30 min of fixes)");
 }
-// The newest flight recording is saved once, as soon as it is complete.
-void saveRecordingIfNew() {
-  if (monitor.recorder().finished() == savedRecordings) return;
-  savedRecordings = monitor.recorder().finished();
-  const FrRecording& r = monitor.recorder().recording(0);
+// Flight recordings live in a circular log in flash (FlashLog) holding the last 40. Each save
+// erases 12 KB, so at most one is saved every 5 minutes; others stay in RAM only.
+const uint32_t kRecordingSaveGapMs = 5 * 60 * 1000UL;
+uint32_t lastRecordingSaveMs = 0;
+bool recordingSaved = false;
+static uint8_t recBuf[FlightRecorder::kBlobSize];  // static: too big for the stack
+void loadRecordings() {
+  gpsdo::RingStore* ring = FlashLog::recordings();
   Preferences p;
   p.begin("gpsdo", false);
-  size_t n = p.putBytes("flightrec", &r, sizeof r);
+  if (p.isKey("flightrec")) {  // one-off move from NVS, then free the space it took
+    if (ring && ring->nextSeq() == 1 && p.getBytes("flightrec", recBuf, sizeof recBuf) == sizeof recBuf)
+      ring->append(recBuf, sizeof recBuf);
+    p.remove("flightrec");
+  }
   p.end();
-  Serial.printf("# flight recording saved (%s, %u s)%s\n", r.reason, (unsigned)r.count, n ? "" : " FAILED: flash full?");
+  if (!ring) return;
+  int n = 0;
+  while (n < FlightRecorder::kKeep && ring->newest(n, nullptr, 0) == (int)sizeof recBuf) ++n;
+  for (int i = n - 1; i >= 0; i--)  // oldest first, so the newest ends up as recording(0)
+    if (ring->newest(i, recBuf, sizeof recBuf) == (int)sizeof recBuf) monitor.recorder().restore(recBuf, sizeof recBuf);
+}
+void saveRecordingIfNew(uint32_t now) {
+  if (monitor.recorder().finished() == savedRecordings) return;
+  if (recordingSaved && ageMs(now, lastRecordingSaveMs) < kRecordingSaveGapMs) return;  // keep the newest for later
+  savedRecordings = monitor.recorder().finished();
+  lastRecordingSaveMs = now;
+  recordingSaved = true;
+  const FrRecording& r = monitor.recorder().recording(0);
+  bool ok = FlashLog::recordings() && FlashLog::recordings()->append(&r, sizeof r);
+  Serial.printf("# flight recording saved (%s, %u s)%s\n", r.reason, (unsigned)r.count, ok ? "" : " FAILED");
 }
 
 // Save the antenna report when it changes (rare: the GPS sends it at its start and on a change).
@@ -283,7 +335,7 @@ void pumpConsole() {
       Serial.println("# antenna position forgotten, relearning over 30 minutes of fixes");
       continue;
     }
-    if (l == "clear events") { monitor.events() = EventLog(); Serial.println("# event log cleared"); continue; }
+    if (l == "clear events") { clearEvents(); Serial.println("# event log cleared"); continue; }
     if (l.size() < 2 || l[1] != ' ') continue;
     if (l[0] == 'N') monitor.onNanoLine(l.substr(2), millis());
     else if (l[0] == 'G') monitor.onGpsLine(l.substr(2), millis());
@@ -345,6 +397,7 @@ void setup() {
 
   Backlight::begin();
   Beeper::begin();
+  FlashLog::begin();
   loadEvents();
   loadLongTerm();
   lastLongSaveMs = millis();
@@ -424,7 +477,8 @@ void loop() {
     beepOnVerdict();
     saveEventsIfChanged(now);
     saveLongTerm(now);
-    saveRecordingIfNew();
+    saveRecordingIfNew(now);
+    FlashLog::prepare();
     saveAntennaIfNew();
     if (portal.active()) {
       ui.showSetup(portal.apSsid().c_str(), portal.apPass().c_str(), "http://192.168.4.1/", portal.status().c_str(),
