@@ -56,7 +56,7 @@ private:
   uint32_t slotOffset(uint32_t slot) const;
   bool slotStartsSector(uint32_t slot) const;
   bool isBlank(uint32_t off, uint32_t n);
-  bool eraseSlotSectors(uint32_t slot, bool oneOnly);
+  int eraseSlotSectors(uint32_t slot, bool oneOnly);  // sectors erased, -1 on error
   bool readValid(uint32_t slot, void* dst, uint32_t cap, uint32_t* seq, uint32_t* len);
 
   FlashIo& io_;
@@ -67,6 +67,7 @@ private:
   uint32_t next_ = 0;       // slot the next append goes into
   uint32_t nextSeq_ = 1;
   uint32_t erases_ = 0;
+  bool nextReady_ = false;  // the next slot is known to be blank, so prepare() has nothing to do
 };
 
 }  // namespace gpsdo

@@ -55,16 +55,18 @@ bool RingStore::isBlank(uint32_t off, uint32_t n) {
 }
 
 // Erases the sectors under a slot that are not already blank (only the first such one if oneOnly).
-bool RingStore::eraseSlotSectors(uint32_t slot, bool oneOnly) {
+int RingStore::eraseSlotSectors(uint32_t slot, bool oneOnly) {
   uint32_t start = perSector_ ? base_ + (slot / perSector_) * sector_ : slotOffset(slot);
+  int n = 0;
   for (uint32_t s = 0; s < sectorsPerSlot_; s++) {
     uint32_t off = start + s * sector_;
     if (isBlank(off, sector_)) continue;
-    if (!io_.erase(off, sector_)) return false;
+    if (!io_.erase(off, sector_)) return -1;
     ++erases_;
-    if (oneOnly) return true;
+    ++n;
+    if (oneOnly) return n;
   }
-  return true;
+  return n;
 }
 
 bool RingStore::readValid(uint32_t slot, void* dst, uint32_t cap, uint32_t* seq, uint32_t* len) {
@@ -97,6 +99,7 @@ void RingStore::scan() {
       bestSlot = i;
     }
   }
+  nextReady_ = false;
   if (best) {
     next_ = (bestSlot + 1) % slots_;
     nextSeq_ = best + 1;
@@ -107,8 +110,9 @@ void RingStore::scan() {
 }
 
 void RingStore::prepare() {
-  if (!slots_) return;
-  if (slotStartsSector(next_)) eraseSlotSectors(next_, true);
+  if (!slots_ || nextReady_) return;
+  // Mid-sector slots need nothing; otherwise erase one sector per call until none is left.
+  if (!slotStartsSector(next_) || eraseSlotSectors(next_, true) == 0) nextReady_ = true;
 }
 
 bool RingStore::append(const void* data, uint32_t len) {
@@ -118,7 +122,7 @@ bool RingStore::append(const void* data, uint32_t len) {
   for (uint32_t tries = 0; tries < slots_; tries++) {
     uint32_t off = slotOffset(next_);
     if (slotStartsSector(next_)) {
-      if (!eraseSlotSectors(next_, false)) return false;
+      if (eraseSlotSectors(next_, false) < 0) return false;
     } else if (!isBlank(off, slotSize_)) {
       next_ = (next_ + 1) % slots_;
       continue;
@@ -127,6 +131,7 @@ bool RingStore::append(const void* data, uint32_t len) {
     bool ok = io_.write(off + kHeader, data, len) && io_.write(off, &h, sizeof h);
     next_ = (next_ + 1) % slots_;
     ++nextSeq_;
+    nextReady_ = false;
     return ok;
   }
   return false;

@@ -78,7 +78,12 @@ void loadEvents() {
     EventLog old;
     if (ring && ring->nextSeq() == 1 && p.getBytes("events", blob, sizeof blob) == sizeof blob && old.fromBlob(blob, sizeof blob))
       for (int i = old.count() - 1; i >= 0; i--) ring->append(&old.newest(i), sizeof(Event));
-    p.remove("events");
+    if (ring) p.remove("events");  // without the flash log there is nowhere to move it, so keep it
+  }
+  // A clear mark from before the flash log was wiped would hide every new event.
+  if (ring && eventsClearedSeq >= ring->nextSeq()) {
+    eventsClearedSeq = 0;
+    p.putUInt("evclear", 0);
   }
   p.end();
   if (ring) {
@@ -140,7 +145,7 @@ void loadLongTerm() {
   Serial.printf("# sky map restored, %u readings; antenna position %s\n", (unsigned)monitor.skyMap().samples(),
                 monitor.watch().positionLearned() ? "known" : "still to learn (30 min of fixes)");
 }
-// Flight recordings live in a circular log in flash (FlashLog) holding the last 40. Each save
+// Flight recordings live in a circular log in flash (FlashLog) holding the last 39 or 40. Each save
 // erases 12 KB, so at most one is saved every 5 minutes; others stay in RAM only.
 const uint32_t kRecordingSaveGapMs = 5 * 60 * 1000UL;
 uint32_t lastRecordingSaveMs = 0;
@@ -153,7 +158,7 @@ void loadRecordings() {
   if (p.isKey("flightrec")) {  // one-off move from NVS, then free the space it took
     if (ring && ring->nextSeq() == 1 && p.getBytes("flightrec", recBuf, sizeof recBuf) == sizeof recBuf)
       ring->append(recBuf, sizeof recBuf);
-    p.remove("flightrec");
+    if (ring) p.remove("flightrec");
   }
   p.end();
   if (!ring) return;
