@@ -85,10 +85,11 @@ void Monitor::onGpsLine(const std::string& line, uint32_t nowMs, int64_t startUs
     ++gpsRestarts_;
     lastRestartMs_ = nowMs;
     gpsStartMs_ = nowMs;
+    gpsSettled_ = false;
   }
   uint32_t sets = nmea_.utcSetCount();
   if (!nmea_.parse(line, nowMs)) return;
-  if (!gpsSeen_ || gpsStale_) gpsStartMs_ = nowMs;
+  if (!gpsSeen_ || gpsStale_) { gpsStartMs_ = nowMs; gpsSettled_ = false; }
   gpsSeen_ = true;
   gpsStale_ = false;
   if (startUs >= 0 && nmea_.utcSetCount() != sets && nmea_.utc().dateValid) {
@@ -213,9 +214,11 @@ void Monitor::tick(uint32_t nowMs) {
     bool good3d = !(a & (kAlarmGpsNoFix | kAlarmGpsFewSats)) && fx.haveGga && fx.haveLatLon && fx.mode == 3;
     // A GPS that has just started can step its UTC once it learns the leap seconds (sent every
     // 12.5 minutes), so a step in the first 15 minutes of hearing it is not a spoofing sign.
+    // Latched, so the millisecond counter wrapping after 49.7 days cannot reopen the window.
+    if (!gpsSettled_ && ageMs(nowMs, gpsStartMs_) >= kGpsSettleMs) gpsSettled_ = true;
     if (clock_.steps() != clockSteps_) {
       clockSteps_ = clock_.steps();
-      if (ageMs(nowMs, gpsStartMs_) >= kGpsSettleMs) watch_.noteTimeStep(nowMs);
+      if (gpsSettled_) watch_.noteTimeStep(nowMs);
     }
     watch_.update(nowMs, top4_, good3d, fx.latDeg, fx.lonDeg, fx.altitudeM, fx.hdop, mean, sd, n);
   }

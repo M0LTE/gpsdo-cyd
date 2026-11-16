@@ -196,6 +196,7 @@ private:
   uint32_t top4LastMs_ = 0;
   bool havePps_ = false;
   bool gpsSeen_ = false;
+  bool gpsSettled_ = false;  // GPS heard for kGpsSettleMs since gpsStartMs_
   uint32_t gpsStartMs_ = 0;  // when the GPS was first heard, or heard again after silence or a restart
   uint32_t lastHelpMs_ = 0;
   bool sawHelp_ = false;
