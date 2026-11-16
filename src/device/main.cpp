@@ -265,10 +265,14 @@ int delayCount = 0;
 uint32_t lastDelayReportMs = 0, lastHeapLogMs = 0;
 float lastDelayMeanMs = -1;  // PPS edge to Nano report, last 60 s mean; -1 until measured
 
+int64_t riseBeforeReportUs = 0, fallBeforeReportUs = 0;  // latest, for /api/pps
+
 void judgePps(int64_t nanoStart) {
   portENTER_CRITICAL(&tsMux);
   int64_t r = ppsRiseUs, f = ppsFallUs;
   portEXIT_CRITICAL(&tsMux);
+  riseBeforeReportUs = r ? nanoStart - r : 0;
+  fallBeforeReportUs = f ? nanoStart - f : 0;
   int kind = 0;
   if (r && nanoStart - r >= 0 && nanoStart - r < 60000) kind = 1;
   else if (f && nanoStart - f >= 0 && nanoStart - f < 60000) kind = 2;
@@ -290,11 +294,12 @@ void judgePps(int64_t nanoStart) {
 // For /api/pps: whether the PPS input is in use for timing, edges seen, and the measured delay
 // from the edge to the Nano's report (the fallback timing assumes Monitor::kNanoPrintDelayUs).
 void ppsStatusJson(std::string& o) {
-  char b[200];
+  char b[280];
   int64_t age = lastPpsFedUs ? (esp_timer_get_time() - lastPpsFedUs) / 1000 : -1;
-  snprintf(b, sizeof b, "{\"in_use\":%s,\"edge\":\"%s\",\"edges_seen\":%u,\"last_edge_ms_ago\":%lld,\"nano_delay_ms\":%.2f}",
+  snprintf(b, sizeof b, "{\"in_use\":%s,\"edge\":\"%s\",\"edges_seen\":%u,\"last_edge_ms_ago\":%lld,\"nano_delay_ms\":%.2f,\"rise_before_report_us\":%lld,\"fall_before_report_us\":%lld}",
            ppsEdgeKind ? "true" : "false", ppsEdgeKind == 1 ? "rising" : ppsEdgeKind == 2 ? "falling" : "none",
-           (unsigned)ppsEdges, (long long)age, lastDelayMeanMs);
+           (unsigned)ppsEdges, (long long)age, lastDelayMeanMs, (long long)riseBeforeReportUs,
+           (long long)fallBeforeReportUs);
   o = b;
 }
 
