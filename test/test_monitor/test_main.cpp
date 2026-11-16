@@ -136,6 +136,10 @@ void test_state_json() {
   TEST_ASSERT_TRUE(j.find("\"dac\":30246") != std::string::npos);
   TEST_ASSERT_TRUE(j.find("\"gps_seen\":false") != std::string::npos);
   TEST_ASSERT_TRUE(j.find("\"alarms\":[]") != std::string::npos);
+  TEST_ASSERT_TRUE(j.find("\"pps_input\":false") != std::string::npos);
+  m.onPpsEdge(1500000);
+  TEST_ASSERT_TRUE(stateJson(m, 1600).find("\"pps_input\":true") != std::string::npos);
+  TEST_ASSERT_TRUE(stateJson(m, 4600).find("\"pps_input\":false") != std::string::npos);  // 3 s without an edge
   m.onGpsLine(kGgaNoFix, 2000);
   m.onNanoLine(nanoLine(101, "Locked"), 2000);
   j = stateJson(m, 2000);

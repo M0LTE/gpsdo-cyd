@@ -81,6 +81,7 @@ std::string stateJson(const Monitor& m, uint32_t nowMs) {
   if (m.frequencyPpb(300, ppb)) add(s, "freq_error_ppb_5min", "%.4f", ppb);
   add(s, "missed_pps_since_display", "%u", (unsigned)m.missedPpsSinceStart());
   add(s, "damaged_lines", "%u", (unsigned)m.damagedLines());
+  add(s, "pps_input", "%s", tf(m.ppsInputLive(nowMs)));
   add(s, "gps_position_learned", "%s", tf(m.watch().positionLearned()));
   add(s, "gps_seen", "%s", tf(m.gpsEverSeen()));
   if (!m.gps().antennaStatus().empty()) {
@@ -135,6 +136,7 @@ const Entity kEntities[] = {
     {"binary_sensor", "gps_interference", "GPS interference",
      "{{ 'ON' if ('gps_spoofing' in value_json.alarms or 'gps_signal_loss' in value_json.alarms) else 'OFF' }}",
      ",\"device_class\":\"problem\""},
+    {"binary_sensor", "pps_input", "PPS input", "{{ 'ON' if value_json.pps_input else 'OFF' }}", ",\"icon\":\"mdi:pulse\""},
     {"sensor", "state", "State", "{{ value_json.state }}", ",\"icon\":\"mdi:information-outline\""},
     {"sensor", "tic_ns", "Phase vs GPS pulse", "{{ value_json.tic_ns }}",
      ",\"unit_of_measurement\":\"ns\",\"state_class\":\"measurement\",\"icon\":\"mdi:sine-wave\""},
