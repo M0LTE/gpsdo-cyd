@@ -263,6 +263,7 @@ int64_t lastPpsFedUs = 0, lastPpsSeenUs = 0;
 int64_t delaySum = 0;
 int delayCount = 0;
 uint32_t lastDelayReportMs = 0, lastHeapLogMs = 0;
+float lastDelayMeanMs = -1;  // PPS edge to Nano report, last 60 s mean; -1 until measured
 
 void judgePps(int64_t nanoStart) {
   portENTER_CRITICAL(&tsMux);
@@ -276,6 +277,7 @@ void judgePps(int64_t nanoStart) {
   if (ppsVotes >= 3 && ppsEdgeKind != kind) {
     ppsEdgeKind = kind;
     Serial.printf("# PPS input found on IO%d, %s edge marks the second\n", PPS_PIN, kind == 1 ? "rising" : "falling");
+    monitor.logEvent(millis(), 0, kind == 1 ? "PPS input found, timing from rising edge" : "PPS input found, timing from falling edge");
   }
   if (ppsEdgeKind) {
     int64_t e = ppsEdgeKind == 1 ? r : f;
@@ -283,6 +285,20 @@ void judgePps(int64_t nanoStart) {
   }
 }
 
+}  // namespace
+
+// For /api/pps: whether the PPS input is in use for timing, edges seen, and the measured delay
+// from the edge to the Nano's report (the fallback timing assumes Monitor::kNanoPrintDelayUs).
+void ppsStatusJson(std::string& o) {
+  char b[200];
+  int64_t age = lastPpsFedUs ? (esp_timer_get_time() - lastPpsFedUs) / 1000 : -1;
+  snprintf(b, sizeof b, "{\"in_use\":%s,\"edge\":\"%s\",\"edges_seen\":%u,\"last_edge_ms_ago\":%lld,\"nano_delay_ms\":%.2f}",
+           ppsEdgeKind ? "true" : "false", ppsEdgeKind == 1 ? "rising" : ppsEdgeKind == 2 ? "falling" : "none",
+           (unsigned)ppsEdges, (long long)age, lastDelayMeanMs);
+  o = b;
+}
+
+namespace {
 uint32_t tickCb() { return millis(); }
 
 void pumpUart(HardwareSerial& port, LineAssembler& lines, bool gps) {
@@ -512,6 +528,7 @@ void loop() {
     }
     if (lastPpsFedUs && esp_timer_get_time() - lastPpsFedUs > 10000000) {
       Serial.println("# PPS input lost, back to the Nano's report for the second mark");
+      monitor.logEvent(millis(), 1, "PPS input lost, timing from Nano report");
       ppsEdgeKind = 0;
       ppsVotes = 0;
       lastPpsFedUs = 0;
@@ -524,7 +541,8 @@ void loop() {
   }
   if (delayCount >= 60 && now - lastDelayReportMs > 60000) {
     lastDelayReportMs = now;
-    Serial.printf("# PPS edge to Nano report: mean %.2f ms over %d s\n", delaySum / 1000.0 / delayCount, delayCount);
+    lastDelayMeanMs = delaySum / 1000.0f / delayCount;
+    Serial.printf("# PPS edge to Nano report: mean %.2f ms over %d s\n", lastDelayMeanMs, delayCount);
     delaySum = 0;
     delayCount = 0;
   }

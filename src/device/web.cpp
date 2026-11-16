@@ -11,6 +11,8 @@
 #include "web_index_gen.h"
 #include "web_json.h"
 
+void ppsStatusJson(std::string& o);  // main.cpp
+
 namespace gpsdo {
 namespace Web {
 namespace {
@@ -129,6 +131,7 @@ void begin(Monitor& m, Net& net) {
     server.sendContent("");  // end of the chunked reply
   });
   server.on("/api/network", HTTP_GET, [] { serveJson([](std::string& o) { networkJson(o); }); });
+  server.on("/api/pps", HTTP_GET, [] { serveJson([](std::string& o) { ppsStatusJson(o); }); });
   server.on("/api/crash", HTTP_GET, [] {
     serveJson([](std::string& o) { o = Watchdog::lastCrash().empty() ? "{}" : Watchdog::lastCrash(); });
   });
