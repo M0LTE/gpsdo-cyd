@@ -2,7 +2,13 @@
 
 #include <Arduino.h>
 #include <esp_system.h>
+#include <esp_core_dump.h>
 #include <esp_timer.h>
+
+#include <cstdio>
+#include <cstring>
+#include <new>
+#include <string>
 
 namespace gpsdo {
 namespace Watchdog {
@@ -14,6 +20,34 @@ esp_timer_handle_t timer = nullptr;
 RTC_NOINIT_ATTR uint32_t firedMagic;
 constexpr uint32_t kFired = 0x57444F47;  // "WDOG"
 const char* reason = nullptr;
+char crashReason[47];
+std::string crashText;
+
+// Reads the core dump the chip saved to flash at its last crash (it survives restarts and app
+// flashes until the next crash overwrites it). Decode the addresses with addr2line against the
+// firmware.elf of the build that crashed.
+void readCoreDump() {
+  esp_core_dump_summary_t* s = new (std::nothrow) esp_core_dump_summary_t;
+  if (!s) return;
+  if (esp_core_dump_get_summary(s) == ESP_OK) {
+    char b[48];
+    crashText = "{\"task\":\"";
+    crashText += std::string(s->exc_task, strnlen(s->exc_task, sizeof(s->exc_task)));
+    snprintf(b, sizeof(b), "\",\"pc\":\"0x%08x\",\"cause\":%u,", (unsigned)s->exc_pc, (unsigned)s->ex_info.exc_cause);
+    crashText += b;
+    snprintf(b, sizeof(b), "\"vaddr\":\"0x%08x\",\"elf_sha256\":\"", (unsigned)s->ex_info.exc_vaddr);
+    crashText += b;
+    crashText += reinterpret_cast<const char*>(s->app_elf_sha256);
+    crashText += s->exc_bt_info.corrupted ? "\",\"backtrace_corrupted\":true,\"backtrace\":\"" : "\",\"backtrace\":\"";
+    for (uint32_t i = 0; i < s->exc_bt_info.depth && i < 16; i++) {
+      snprintf(b, sizeof(b), i ? " 0x%08x" : "0x%08x", (unsigned)s->exc_bt_info.bt[i]);
+      crashText += b;
+    }
+    crashText += "\"}";
+    snprintf(crashReason, sizeof(crashReason), "Display crashed in %.15s, see /api/crash", s->exc_task);
+  }
+  delete s;
+}
 
 void check(void*) {
   if (esp_timer_get_time() - lastFeedUs > kLimitUs) {
@@ -27,8 +61,9 @@ void check(void*) {
 
 void begin() {
   esp_reset_reason_t r = esp_reset_reason();
+  readCoreDump();
   if (firedMagic == kFired && r == ESP_RST_SW) reason = "Display restarted by its watchdog (loop stuck)";
-  else if (r == ESP_RST_PANIC) reason = "Display restarted after a crash";
+  else if (r == ESP_RST_PANIC) reason = crashReason[0] ? crashReason : "Display restarted after a crash";
   else if (r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT || r == ESP_RST_WDT) reason = "Display restarted by the chip's watchdog";
   else if (r == ESP_RST_BROWNOUT) reason = "Display restarted: its USB power dipped";
   firedMagic = 0;
@@ -39,10 +74,13 @@ void begin() {
   esp_timer_create(&a, &timer);
   esp_timer_start_periodic(timer, 1000000);
   if (reason) Serial.printf("# %s\n", reason);
+  if (!crashText.empty()) Serial.printf("# last crash: %s\n", crashText.c_str());
 }
 
 void feed() { lastFeedUs = esp_timer_get_time(); }
 
 const char* lastResetReason() { return reason; }
+
+const std::string& lastCrash() { return crashText; }
 }  // namespace Watchdog
 }  // namespace gpsdo

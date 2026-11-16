@@ -7,6 +7,7 @@
 #include <string>
 
 #include "state_json.h"
+#include "watchdog.h"
 #include "web_index_gen.h"
 #include "web_json.h"
 
@@ -128,6 +129,9 @@ void begin(Monitor& m, Net& net) {
     server.sendContent("");  // end of the chunked reply
   });
   server.on("/api/network", HTTP_GET, [] { serveJson([](std::string& o) { networkJson(o); }); });
+  server.on("/api/crash", HTTP_GET, [] {
+    serveJson([](std::string& o) { o = Watchdog::lastCrash().empty() ? "{}" : Watchdog::lastCrash(); });
+  });
   server.onNotFound([] { server.send(404, "text/plain", "not found"); });
   server.begin();
   started = true;
