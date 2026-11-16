@@ -54,8 +54,52 @@ void test_reply_unsynced_and_bad_requests() {
   TEST_ASSERT_FALSE(buildNtpReply(req, 48, 0, 0, st, out));
 }
 
+static void put64t(uint8_t* p, uint64_t v) { for (int i = 7; i >= 0; --i) { p[i] = (uint8_t)v; v >>= 8; } }
+
+void test_interleaved() {
+  Interleave il;
+  NtpServerState st;
+  st.synced = true;
+  uint8_t req[48] = {0}, out[48];
+  req[0] = (4 << 3) | 3;
+  uint64_t prev = 0;
+  // First request of an association: basic (origin zero).
+  put64t(req + 40, 0x1111);
+  TEST_ASSERT_FALSE(il.take(7, req, prev));
+  il.save(7, 0xAAAA, 0xBBBB);  // our reply: received at AAAA, really left at BBBB
+  // Interleaved request: origin = our receive timestamp, receive != transmit.
+  put64t(req + 24, 0xAAAA);
+  put64t(req + 32, 0x2222);
+  put64t(req + 40, 0x3333);
+  TEST_ASSERT_FALSE(il.take(8, req, prev));  // another address does not get it
+  TEST_ASSERT_TRUE(il.take(7, req, prev));
+  TEST_ASSERT_EQUAL_UINT64(0xBBBB, prev);
+  TEST_ASSERT_FALSE(il.take(7, req, prev));  // used once only
+  TEST_ASSERT_TRUE(buildNtpReplyTs(req, 48, 0xCCCC, prev, true, st, out));
+  TEST_ASSERT_EQUAL_UINT64(0x2222, get64(out + 24));  // origin = request's receive timestamp
+  TEST_ASSERT_EQUAL_UINT64(0xCCCC, get64(out + 32));
+  TEST_ASSERT_EQUAL_UINT64(0xBBBB, get64(out + 40));
+  // receive == transmit marks a basic request even with a matching origin.
+  il.save(7, 0xDDDD, 0xEEEE);
+  put64t(req + 24, 0xDDDD);
+  put64t(req + 32, 0x4444);
+  put64t(req + 40, 0x4444);
+  TEST_ASSERT_FALSE(il.take(7, req, prev));
+  TEST_ASSERT_TRUE(il.holds(0xDDDD));
+  TEST_ASSERT_TRUE(buildNtpReplyTs(req, 48, 1, 2, false, st, out));
+  TEST_ASSERT_EQUAL_UINT64(0x4444, get64(out + 24));  // basic: origin = request's transmit
+}
+
+void test_timestamp_noise_stays_inside_the_microsecond() {
+  int64_t us = 1794096000LL * 1000000 + 123456;
+  uint64_t a = ntpTimestamp(us), b = ntpTimestamp(us, 0xFFFFFFFF), c = ntpTimestamp(us + 1);
+  TEST_ASSERT_TRUE(b > a && b < c);
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_interleaved);
+  RUN_TEST(test_timestamp_noise_stays_inside_the_microsecond);
   RUN_TEST(test_timestamp);
   RUN_TEST(test_reply_synced);
   RUN_TEST(test_reply_unsynced_and_bad_requests);

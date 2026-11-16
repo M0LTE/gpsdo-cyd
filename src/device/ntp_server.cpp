@@ -1,6 +1,7 @@
 #include "ntp_server.h"
 
 #include <Arduino.h>
+#include <esp_random.h>
 #include <esp_timer.h>
 #include <lwip/sockets.h>
 
@@ -13,7 +14,8 @@ portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 int64_t baseLocalUs = 0, baseUnixUs = 0, refUnixUs = 0;
 bool isSynced = false, haveClock = false;
 uint32_t dispersionUs = 0;
-volatile uint32_t served = 0;
+volatile uint32_t served = 0, servedInterleaved = 0;
+Interleave interleave;  // used only by the NTP task
 
 bool unixAt(int64_t localUs, int64_t& unixUs, NtpServerState& st) {
   portENTER_CRITICAL(&mux);
@@ -48,9 +50,26 @@ void task(void*) {
     int64_t rxUnix, txUnix;
     NtpServerState st;
     if (!unixAt(rxLocal, rxUnix, st)) continue;  // no time at all yet: stay silent
+    uint32_t ip = from.sin_addr.s_addr;
+    uint8_t mode = req[0] & 7, version = (req[0] >> 3) & 7;
+    if ((mode != 3 && mode != 1) || version < 1 || version > 4) continue;  // not a request we answer
+    // Random bits below the microsecond keep our receive timestamps unique between clients.
+    uint64_t rxTs = ntpTimestamp(rxUnix, esp_random());
+    while (interleave.holds(rxTs)) ++rxTs;
+    uint64_t prevTx = 0;
+    // Client/server interleaving only: symmetric (mode 1) interleaving has different rules.
+    bool xleave = mode == 3 && interleave.take(ip, req, prevTx);
     unixAt(esp_timer_get_time(), txUnix, st);
-    if (!buildNtpReply(req, n, rxUnix, txUnix, st, out)) continue;
+    uint64_t txTs = xleave ? prevTx : ntpTimestamp(txUnix, esp_random());
+    if (!xleave && txTs <= rxTs) txTs = rxTs + 1;  // independent sub-microsecond noise must not reverse them
+    if (!buildNtpReplyTs(req, n, rxTs, txTs, xleave, st, out)) continue;
     sendto(sock, out, sizeof out, 0, (sockaddr*)&from, fl);
+    // sendto returns once lwIP has handed the frame to the Wi-Fi driver: as close to the real
+    // send time as we can see. A client in the interleaved mode gets this with its next reply.
+    int64_t sentUnix;
+    unixAt(esp_timer_get_time(), sentUnix, st);
+    interleave.save(ip, rxTs, ntpTimestamp(sentUnix, esp_random()));
+    if (xleave) servedInterleaved = servedInterleaved + 1;
     served = served + 1;
   }
 }
@@ -76,6 +95,7 @@ void setUnsynced() {
 }
 
 uint32_t requests() { return served; }
+uint32_t interleavedRequests() { return servedInterleaved; }
 bool synced() { return isSynced; }
 
 }  // namespace NtpServer

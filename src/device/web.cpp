@@ -6,6 +6,7 @@
 #include <new>
 #include <string>
 
+#include "ntp_server.h"
 #include "state_json.h"
 #include "watchdog.h"
 #include "web_index_gen.h"
@@ -62,6 +63,8 @@ void networkJson(std::string& o) {
   appendStr(o, x.mac);
   std::snprintf(b, sizeof b, ",\"rssi_dbm\":%d,\"channel\":%d,\"ntp_synced\":%s,\"ntp_served\":%u", x.rssi, x.channel,
                 x.ntpSynced ? "true" : "false", (unsigned)x.ntpRequests);
+  o += b;
+  std::snprintf(b, sizeof b, ",\"ntp_served_interleaved\":%u", (unsigned)NtpServer::interleavedRequests());
   o += b;
   o += ",\"mqtt_host\":";
   appendStr(o, x.mqttHost);
