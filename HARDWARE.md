@@ -31,7 +31,7 @@ PaulV's V2/V2.1 schematic shows J1 as the GPS serial header ("Ser2USB") and J4 a
 - Ground from the same header. All three on the CYD's P3 connector; IO21 on P3 (the backlight) is left unconnected.
 - The CYD has its own USB power. The GPSDO has no 3.3 V rail big enough to run it, and its 5 V rails feed the TIC and the oscillator.
 - The front "GPS / TRG" connector stays free for a USB-serial adapter to the GPS (3.3 V, adapter RX to the left pin).
-- Not yet done: the front 1PPS BNC (5 V logic) to the CYD's IO27 on CN1 through a 10k/20k divider, for a directly timed second edge. Needs a second 1.25 mm lead.
+- The front 1PPS BNC (5 V logic) goes to the CYD's IO27 on CN1 through a 10k/20k divider (wired 16 Nov 2026). The BNC pulse is the u-blox timepulse inverted: it falls on the second and rises 200 ms later. The display finds the edge itself and reports it at /api/pps.
 
 Checked after wiring: the report the CYD receives through the tap was identical to the Nano's USB report for every second compared (70 of 70), and second-to-second phase noise was unchanged (spread of diff_ns 9.8 ns before, 10.1 ns after).
 
@@ -65,7 +65,7 @@ A verified backup of the original flash and EEPROM, with restore instructions, i
 - **Restarts:** a loose 12 V connection restarted the whole GPSDO twice on 8 Nov 2026 (both the Nano and the GPS printed their start-up text together). Each restart costs about 30 minutes: 5 minutes of warm-up, then 25 minutes of good seconds before Locked.
 - **Missed PPS:** the Nano had quietly counted 6 missed pulses before the status line made them visible.
 - **Oscillator:** over the 18 days stored in the Nano, the oven sat between 41.7 and 44.4 C and the DAC between about 30210 and 30302, following the temperature. In a 25-minute locked capture the phase against the GPS pulse had a spread of 13 ns and the DAC moved 66 counts.
-- **Report timing:** the Nano starts its report 5.8 ms after each PPS edge (measured against NTP); the display uses that to time the second for its clock and NTP server.
+- **Report timing:** the Nano starts its report 3.15 ms after each PPS edge (measured with the PPS wired, 16 Nov 2026). The display times the second from the PPS itself and falls back to the report minus 3.15 ms when the PPS is missing. An earlier 5.8 ms figure, measured over Wi-Fi NTP, was 2.7 ms too long.
 
 ## The display (CYD)
 

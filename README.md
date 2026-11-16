@@ -83,7 +83,7 @@ Once on Wi-Fi the display serves a read-only page at **http://gpsdo.local/** (mD
 
 ## NTP server
 
-Once on Wi-Fi, the CYD answers NTP on UDP port 123 as a stratum 1 server with reference "GPS". The second comes from the GPS messages and the start of each second from the GPSDO: the Nano starts its report a fixed 5.8 ms after each PPS edge, and the CYD timestamps the first byte in the UART's receive interrupt. Requests are timestamped in their own task as they arrive, and Wi-Fi power saving is off, because sleeping between beacons delays requests but not replies, which would show up as an offset.
+Once on Wi-Fi, the CYD answers NTP on UDP port 123 as a stratum 1 server with reference "GPS". The second comes from the GPS messages and the start of each second from the GPSDO's 1PPS output, wired to IO27 and timestamped in its interrupt (see /api/pps). Without the PPS the CYD falls back to the Nano's report, which starts 3.15 ms after each PPS edge, timestamping its first byte in the UART's receive interrupt. Requests are timestamped in their own task as they arrive, and Wi-Fi power saving is off, because sleeping between beacons delays requests but not replies, which would show up as an offset.
 
 Measured on 2026-11-08 against a clock synced to 0.03 ms: offset within 0.3 ms, round trip about 9 ms over Wi-Fi. When the GPS has no fix or the second marks stop, it replies with stratum 16 and the "not synchronised" flag, so clients ignore it.
 

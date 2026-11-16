@@ -76,9 +76,9 @@ public:
   void onPpsEdge(int64_t us) { lastPpsUs_ = us; havePps_ = true; clock_.onSecondMark(us); }
   const UtcClock& clock() const { return clock_; }
   // Delay from the PPS edge to the first byte of the Nano's report line (measured, see README).
-  // Measured 2026-11-08 against NTP (stratum 2, 0.03 ms) over Wi-Fi, lowest-delay samples: the
-  // CYD read 5.8 ms slow without it. Remeasure directly once the PPS is wired (console reports it).
-  static constexpr int64_t kNanoPrintDelayUs = 5800;
+  // Measured 2026-11-16 against the PPS wired to IO27: 3.15 ms. (The earlier 5.8 ms came from
+  // NTP over Wi-Fi, whose path asymmetry made it 2.7 ms too long.) Used only while the PPS is absent.
+  static constexpr int64_t kNanoPrintDelayUs = 3150;
   void onUbxSeen() { nmea_.noteUbx(); }
   // Call about once a second: expires satellites and recomputes alarms.
   void tick(uint32_t nowMs);
