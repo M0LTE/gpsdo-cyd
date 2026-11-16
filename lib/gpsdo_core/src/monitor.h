@@ -63,6 +63,7 @@ public:
   static constexpr uint32_t kSilentMs = 3000;
   static constexpr uint32_t kTrendStepS = 12;       // one stored point per 12 s of reports
   static constexpr size_t kTrendPoints = 150;       // 30 minutes
+  static constexpr uint32_t kGpsSettleMs = 15 * 60000;  // GPS time steps ignored this long after it starts
 
   // startUs: local microseconds when the line's first byte arrived, or -1 if unknown (read from a
   // backlog), in which case the line is used for everything except timing. For the Nano that marks the
@@ -195,6 +196,8 @@ private:
   uint32_t top4LastMs_ = 0;
   bool havePps_ = false;
   bool gpsSeen_ = false;
+  bool gpsSettled_ = false;  // GPS heard for kGpsSettleMs since gpsStartMs_
+  uint32_t gpsStartMs_ = 0;  // when the GPS was first heard, or heard again after silence or a restart
   uint32_t lastHelpMs_ = 0;
   bool sawHelp_ = false;
   // Once a source has been silent past kSilentMs it stays stale until new data arrives, so a clock
