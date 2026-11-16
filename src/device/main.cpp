@@ -564,7 +564,7 @@ void loop() {
   } else {
     NtpServer::setUnsynced();
   }
-  updateClockDigits(nowUs);
+  if (!portal.active()) updateClockDigits(nowUs);  // the setup screen has no clock
   lv_timer_handler();
   delay(5);
 }

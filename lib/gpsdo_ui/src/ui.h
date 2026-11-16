@@ -122,6 +122,7 @@ private:
   int64_t lastClockDs_ = -1;
 
   // Status
+  int bannerHeadline_ = -1;  // headline the banner colour was last set for
   void *banner_ = nullptr, *headline_ = nullptr, *subline_ = nullptr;
   void *gpsMain_ = nullptr, *gpsSub_ = nullptr;
   void *ticMain_ = nullptr, *ticSub_ = nullptr;

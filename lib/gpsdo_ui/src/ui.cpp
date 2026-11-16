@@ -194,6 +194,7 @@ void Ui::buildStatus() {
   lv_obj_t* s = newScreen();
   screens_[kStatus] = s;
   banner_ = box(s, 6, 6, kW - 12, 78, kGrey, 10);
+  bannerHeadline_ = -1;
   headline_ = text(O(banner_), &lv_font_montserrat_40, 0xFFFFFF, 12, 4, "NO DATA");
   // UTC to 0.1 s at the right of the subline row, one fixed-width label per character so the
   // digits do not shuffle as they change.
@@ -253,7 +254,11 @@ void Ui::buildStatus() {
 void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
   char b[96];
   Headline h = m.headline();
-  lv_obj_set_style_bg_color(O(banner_), lv_color_hex(headlineColor(h)), 0);
+  // Only on a change: restyling invalidates the whole banner, which would slow the 0.1 s clock.
+  if ((int)h != bannerHeadline_) {
+    lv_obj_set_style_bg_color(O(banner_), lv_color_hex(headlineColor(h)), 0);
+    bannerHeadline_ = (int)h;
+  }
   setText(headline_, headlineText(h));
   const ReportTracker& n = m.nano();
   const ReportLine& d = n.last();
@@ -267,15 +272,14 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
       {
         // One count at most, so the line fits the banner: lock losses matter more than missed pulses.
         int k = std::snprintf(b, sizeof b, "for %s%s", dur, known ? "" : "+");
+        // Missed pulses are on the web page and in Home Assistant; the banner has room for one count.
         if (n.lockLosses())
           std::snprintf(b + k, sizeof b - k, ", %u unlock%s", (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "s");
-        else if (m.missedPpsSinceStart())
-          std::snprintf(b + k, sizeof b - k, ", %u missed", (unsigned)m.missedPpsSinceStart());
       }
-      if (m.gpsdoRestarts() || m.gpsRestarts()) {
+      if ((m.gpsdoRestarts() || m.gpsRestarts()) && ageMs(nowMs, m.lastRestartMs()) < 3600000UL) {
         char ago[24];
         fmtDuration(ago, sizeof ago, ageMs(nowMs, m.lastRestartMs()) / 1000);
-        std::snprintf(b, sizeof b, "%s, restart %s ago", dur, ago);
+        std::snprintf(b, sizeof b, "restarted %s ago", ago);
       }
       break;
     case Headline::RefSuspect:
@@ -297,7 +301,7 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
     case Headline::NoPps:
       if ((m.gpsdoRestarts() || m.gpsRestarts()) && ageMs(nowMs, m.lastRestartMs()) < 3600000UL) {
         fmtDuration(dur, sizeof dur, ageMs(nowMs, m.lastRestartMs()) / 1000);
-        std::snprintf(b, sizeof b, "restart %s ago, no GPS", dur);
+        std::snprintf(b, sizeof b, "restarted %s ago", dur);
       } else {
         std::snprintf(b, sizeof b, "no GPS pulse, holding");
       }
@@ -306,7 +310,7 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
     case Headline::Holdover: std::snprintf(b, sizeof b, "hold set by command"); break;
     case Headline::WarmUp:
       fmtDuration(dur, sizeof dur, m.warmUpRemainingS());
-      std::snprintf(b, sizeof b, "warm-up, %s to go", dur);
+      std::snprintf(b, sizeof b, "warm-up, %s left", dur);
       break;
     default:
       std::snprintf(b, sizeof b, n.haveData() ? "GPSDO silent" : "waiting for the GPSDO");
