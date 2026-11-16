@@ -12,6 +12,7 @@ void begin();
 void setClock(int64_t localUs, int64_t unixUs, bool synced, uint32_t rootDispersionUs);
 void setUnsynced();  // no usable clock right now: reply with "not synchronised"
 uint32_t requests();
+uint32_t interleavedRequests();  // answered in the interleaved mode (chrony "xleave")
 bool synced();
 }  // namespace NtpServer
 
