@@ -180,6 +180,7 @@ void Ui::show(int screen) {
   int old = current_;
   if (!screens_[screen]) build(screen);
   current_ = screen;
+  lastClockDs_ = -1;
   lv_screen_load(O(screens_[screen]));
   if (old != screen && screens_[old]) {
     lv_obj_delete(O(screens_[old]));  // its child pointers are never used again until rebuilt
@@ -194,9 +195,24 @@ void Ui::buildStatus() {
   screens_[kStatus] = s;
   banner_ = box(s, 6, 6, kW - 12, 78, kGrey, 10);
   headline_ = text(O(banner_), &lv_font_montserrat_40, 0xFFFFFF, 12, 4, "NO DATA");
+  // UTC to 0.1 s at the right of the subline row, one fixed-width label per character so the
+  // digits do not shuffle as they change.
+  const int digitW = 13, sepW = 6;
+  int widths[kClockChars] = {digitW, digitW, sepW, digitW, digitW, sepW, digitW, digitW, sepW, digitW};
+  int x = kW - 12 - 14;
+  for (int w : widths) x -= w;
+  const int clockX = x;
+  for (int i = 0; i < kClockChars; ++i) {
+    lv_obj_t* l = text(O(banner_), &lv_font_montserrat_20, 0xFFFFFF, x, 45, "-");
+    lv_obj_set_width(l, widths[i]);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    x += widths[i];
+    clockChar_[i] = l;
+  }
+  clockSource_ = nullptr;
   subline_ = text(O(banner_), &lv_font_montserrat_14, 0xFFFFFF, 14, 50, "waiting for the GPSDO");
   lv_obj_set_style_text_opa(O(subline_), LV_OPA_80, 0);
-  lv_obj_set_size(O(subline_), kW - 12 - 28, 18);  // one line, "..." if too long
+  lv_obj_set_size(O(subline_), clockX - 14 - 8, 18);  // one line, "..." if too long
   lv_label_set_long_mode(O(subline_), LV_LABEL_LONG_DOT);
   // Progress bar along the bottom of the banner: warm-up timer, or good seconds towards lock.
   progressTrack_ = box(O(banner_), 14, 69, kW - 12 - 28, 4, 0xFFFFFF, 2);
@@ -252,50 +268,48 @@ void Ui::updateStatus(const Monitor& m, uint32_t nowMs) {
         // One count at most, so the line fits the banner: lock losses matter more than missed pulses.
         int k = std::snprintf(b, sizeof b, "for %s%s", dur, known ? "" : "+");
         if (n.lockLosses())
-          std::snprintf(b + k, sizeof b - k, ", %u lock loss%s", (unsigned)n.lockLosses(),
-                        n.lockLosses() == 1 ? "" : "es");
+          std::snprintf(b + k, sizeof b - k, ", %u unlock%s", (unsigned)n.lockLosses(), n.lockLosses() == 1 ? "" : "s");
         else if (m.missedPpsSinceStart())
-          std::snprintf(b + k, sizeof b - k, ", %u missed pulse%s", (unsigned)m.missedPpsSinceStart(),
-                        m.missedPpsSinceStart() == 1 ? "" : "s");
+          std::snprintf(b + k, sizeof b - k, ", %u missed", (unsigned)m.missedPpsSinceStart());
       }
       if (m.gpsdoRestarts() || m.gpsRestarts()) {
         char ago[24];
         fmtDuration(ago, sizeof ago, ageMs(nowMs, m.lastRestartMs()) / 1000);
-        std::snprintf(b, sizeof b, "for %s, restarted %s ago", dur, ago);
+        std::snprintf(b, sizeof b, "%s, restart %s ago", dur, ago);
       }
       break;
     case Headline::RefSuspect:
-      std::snprintf(b, sizeof b, "but the GPS has no good fix");
+      std::snprintf(b, sizeof b, "GPS has no good fix");
       break;
     case Headline::Unlocked: {
       uint32_t e = m.earliestLockS();
       if (e && m.haveStatus(nowMs) && m.status().mode == 'R') {
         fmtDuration(dur, sizeof dur, e);
-        std::snprintf(b, sizeof b, "%+.0f ns off; locks in %s if it stays in", m.ticErrorNs(), dur);
+        std::snprintf(b, sizeof b, "locks in %s", dur);
       } else if (e) {
         fmtDuration(dur, sizeof dur, e);
-        std::snprintf(b, sizeof b, "%+.0f ns off; earliest lock in %s", m.ticErrorNs(), dur);
+        std::snprintf(b, sizeof b, "locks in %s+", dur);
       } else {
-        std::snprintf(b, sizeof b, "phase %+.0f ns off target (limit 100)", m.ticErrorNs());
+        std::snprintf(b, sizeof b, "%+.0f ns off (limit 100)", m.ticErrorNs());
       }
       break;
     }
     case Headline::NoPps:
       if ((m.gpsdoRestarts() || m.gpsRestarts()) && ageMs(nowMs, m.lastRestartMs()) < 3600000UL) {
         fmtDuration(dur, sizeof dur, ageMs(nowMs, m.lastRestartMs()) / 1000);
-        std::snprintf(b, sizeof b, "restarted %s ago, waiting for GPS", dur);
+        std::snprintf(b, sizeof b, "restart %s ago, no GPS", dur);
       } else {
-        std::snprintf(b, sizeof b, "no GPS pulse, holding last tune");
+        std::snprintf(b, sizeof b, "no GPS pulse, holding");
       }
       break;
-    case Headline::Missing10MHz: std::snprintf(b, sizeof b, "no 10 MHz from the oscillator"); break;
-    case Headline::Holdover: std::snprintf(b, sizeof b, "hold mode set by command"); break;
+    case Headline::Missing10MHz: std::snprintf(b, sizeof b, "no 10 MHz output"); break;
+    case Headline::Holdover: std::snprintf(b, sizeof b, "hold set by command"); break;
     case Headline::WarmUp:
       fmtDuration(dur, sizeof dur, m.warmUpRemainingS());
-      std::snprintf(b, sizeof b, "start-up timer, %s to go", dur);
+      std::snprintf(b, sizeof b, "warm-up, %s to go", dur);
       break;
     default:
-      std::snprintf(b, sizeof b, n.haveData() ? "no report from the GPSDO" : "waiting for the GPSDO");
+      std::snprintf(b, sizeof b, n.haveData() ? "GPSDO silent" : "waiting for the GPSDO");
   }
   setText(subline_, b);
   int pm = m.progressPermille();
@@ -728,7 +742,7 @@ void Ui::updateTime(const Monitor& m, uint32_t nowMs) {
 }
 
 void Ui::fastUpdate(const Monitor& m, int64_t nowUs) {
-  if (current_ != kTime) return;
+  if (!showsClock()) return;
   int64_t u;
   bool pps;
   char b[16];
@@ -736,7 +750,7 @@ void Ui::fastUpdate(const Monitor& m, int64_t nowUs) {
     if (lastClockDs_ == -2) return;
     lastClockDs_ = -2;
     std::snprintf(b, sizeof b, "--:--:--.-");
-    setText(clockSource_, m.gpsEverSeen() ? "waiting for GPS time" : "no GPS data");
+    if (clockSource_) setText(clockSource_, m.gpsEverSeen() ? "waiting for GPS time" : "no GPS data");
   } else {
     int64_t t = u % 86400000000LL;  // microseconds of the UTC day
     if (t / 100000 == lastClockDs_) return;
@@ -744,7 +758,7 @@ void Ui::fastUpdate(const Monitor& m, int64_t nowUs) {
     unsigned ds = (unsigned)((t / 100000) % 10), sec = (unsigned)((t / 1000000) % 60),
              min = (unsigned)((t / 60000000) % 60), hr = (unsigned)(t / 3600000000LL);
     std::snprintf(b, sizeof b, "%02u:%02u:%02u.%u", hr, min, sec, ds);
-    setText(clockSource_, pps ? "seconds aligned to the GPS pulse" : "from GPS messages only, may lag up to 0.1 s");
+    if (clockSource_) setText(clockSource_, pps ? "seconds aligned to the GPS pulse" : "from GPS messages only, may lag up to 0.1 s");
   }
   for (int i = 0; i < kClockChars; ++i) {
     char c[2] = {b[i], 0};

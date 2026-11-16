@@ -43,6 +43,8 @@ public:
   // nowUs is on the same local microsecond clock as the timestamps given to the monitor.
   void fastUpdate(const Monitor& m, int64_t nowUs);
   int current() const { return current_; }
+  // Screens with the 0.1 s UTC clock that fastUpdate draws.
+  bool showsClock() const { return current_ == kTime || current_ == kStatus; }
   // Full-screen Wi-Fi setup instructions, shown while the setup portal runs.
   void showSetup(const char* apSsid, const char* apPass, const char* url, const char* status, uint32_t secondsLeft);
 
@@ -114,7 +116,7 @@ private:
 
   // Time and position
   static constexpr int kClockChars = 10;  // HH:MM:SS.s
-  void* clockChar_[kClockChars] = {};
+  void* clockChar_[kClockChars] = {};  // on the time screen, or in the status banner
   void *dateLabel_ = nullptr, *clockSource_ = nullptr;
   void *locLabel_ = nullptr, *latLabel_ = nullptr, *lonLabel_ = nullptr, *altLabel_ = nullptr;
   int64_t lastClockDs_ = -1;

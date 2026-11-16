@@ -450,7 +450,7 @@ bool resetReasonLogged = false;
 void updateClockDigits(int64_t nowUs) {
   int64_t unixUs;
   bool aligned;
-  if (ui.current() != Ui::kTime || !monitor.clock().now(nowUs, unixUs, aligned)) {
+  if (!ui.showsClock() || !monitor.clock().now(nowUs, unixUs, aligned)) {
     clockShownUntil = 0;
     if (millis() - lastFastMs >= 50) {
       lastFastMs = millis();
