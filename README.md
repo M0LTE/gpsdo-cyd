@@ -6,7 +6,7 @@ It listens to two serial lines inside the GPSDO, the Arduino Nano's once-a-secon
 
 ![Screens](docs/screens/overview.png)
 
-*Status: running on a real CYD (two-USB board, ILI9341 panel) with the GPSDO report relayed over USB; the taps are not wired yet.*
+*Status: in daily use on a real CYD (two-USB board, ILI9341 panel), wired to the GPSDO's taps and 1PPS, on Wi-Fi.*
 
 ## Why "reference OK" and not just "locked"
 
@@ -16,7 +16,7 @@ The GPSDO's own "Locked" only means its loop is tracking the GPS pulse. When the
 
 Tap anywhere for the next screen.
 
-1. **Status.** A big coloured banner with the state, then GPS satellites and fix, phase against the GPS pulse, oscillator tuning (with its usable range and the red end zones) and oscillator temperature. During start-up and while locking, a bar shows progress.
+1. **Status.** A big coloured banner with the state and UTC to 0.1 s, then GPS satellites and fix, phase against the GPS pulse, oscillator tuning (with its usable range and the red end zones) and oscillator temperature. During start-up and while locking, a bar shows progress.
 2. **Time and position.** UTC to a tenth of a second, the date, latitude and longitude, altitude and the 8-character Maidenhead locator. The position is only shown, never published.
 3. **10 MHz accuracy.** The average frequency error over 1, 5 and 30 minutes in parts per billion, from the change in phase against the GPS pulse, and what the 30-minute figure means in hertz on 3.5 to 144 MHz.
 4. **Stability.** The Allan deviation of the 10 MHz against GPS from 1 s to about 20 minutes, from up to an hour of continuous locked seconds, on a log-log plot. Short averaging times mostly show the GPS pulse's own jitter; longer ones show the oscillator and the loop. Below it, how the tuning has followed the oven temperature over the GPSDO's 18-day history, and the `tempRef`/`tempCoeff` that would compensate (shown only, never sent).
@@ -45,7 +45,7 @@ After moving the antenna, type `forget position` on the console so it relearns.
 
 | Banner | Colour | Meaning |
 |---|---|---|
-| LOCKED | green | GPSDO locked. The sub-line says for how long and how many lock losses since the display started. |
+| LOCKED | green | GPSDO locked. The sub-line says for how long and how many unlocks since the display started. |
 | GPS LOST | red | GPSDO says locked, but the GPS has no fix, too few satellites, or has gone quiet. Don't trust the reference. |
 | UNLOCKED | amber | GPSDO not locked yet. Shows how far the TIC is from target and the soonest it could lock (5 x the time constant of good seconds). |
 | NO PPS | red | No pulse from the GPS; the GPSDO is holding its last setting. |
@@ -75,19 +75,21 @@ With our modified Nano firmware (`nano/`) the state also carries `lock_counter`,
 
 `reference_ok` is the one field to act on. `alarms` can hold `gpsdo_silent`, `no_pps`, `no_10mhz`, `unlocked`, `dac_near_limit`, `gps_silent`, `gps_no_fix`, `gps_few_sats` and `reference_suspect`.
 
-Home Assistant picks up a "GPSDO" device with Reference OK, Locked, State, TIC, TIC error, DAC, both temperatures, time locked, lock losses and satellites used.
+The state also carries `pps_input`: true while the 1PPS wired to IO27 is giving edges.
+
+Home Assistant picks up a "GPSDO" device with Reference OK, Locked, GPS interference, PPS input, State, phase, phase error, DAC, both temperatures, time locked, lock progress, lock losses, missed pulses, satellites used, 30-minute frequency error, antenna status and restart counts.
 
 ## Web page and names
 
-Once on Wi-Fi the display serves a read-only page at **http://gpsdo.local/** (mDNS; it also advertises its web page and NTP server). It also asks for the name `gpsdo` when it gets its address, so on networks whose router registers DHCP names it is reachable as plain `gpsdo` too (here `gpsdo.lan`). The page shows the verdict, the full event log, trends, the 18-day history, satellites and frequency error; the same data is JSON at `/api/state`, `/api/events`, `/api/trends`, `/api/history`, `/api/sats` and `/api/accuracy`.
+Once on Wi-Fi the display serves a read-only web page. It asks for the name `gpsdo` when it gets its address, so on networks whose router registers DHCP names it is reachable as `gpsdo` (here **http://gpsdo.lan/**). There is no mDNS: the ESP32's mDNS responder crashed the display on a packet from another device. The page shows the verdict, the full event log, trends, the 18-day history, satellites and frequency error; the same data is JSON at `/api/state`, `/api/events`, `/api/trends`, `/api/history`, `/api/sats`, `/api/accuracy`, `/api/time`, `/api/stability`, `/api/skymap`, `/api/recordings`, `/api/network` and `/api/pps`. After a crash, `/api/crash` gives the crashing task, program counter and backtrace (decode with `xtensa-esp32-elf-addr2line` against the `firmware.elf` of the build that crashed).
 
 ## NTP server
 
 Once on Wi-Fi, the CYD answers NTP on UDP port 123 as a stratum 1 server with reference "GPS". The second comes from the GPS messages and the start of each second from the GPSDO's 1PPS output, wired to IO27 and timestamped in its interrupt (see /api/pps). Without the PPS the CYD falls back to the Nano's report, which starts 3.15 ms after each PPS edge, timestamping its first byte in the UART's receive interrupt. Requests are timestamped in their own task as they arrive, and Wi-Fi power saving is off, because sleeping between beacons delays requests but not replies, which would show up as an offset.
 
-Measured on 2026-11-08 against a clock synced to 0.03 ms: offset within 0.3 ms, round trip about 9 ms over Wi-Fi. When the GPS has no fix or the second marks stop, it replies with stratum 16 and the "not synchronised" flag, so clients ignore it.
+It supports the interleaved mode (chrony `server gpsdo.lan iburst xleave`): a reply carries the time the previous reply actually left, taken after `sendto` returns, instead of an estimate made before sending. Measured 2026-11-16 from a wired LAN host, this put clients about 1.4 ms closer to true time than the basic mode (median offset -0.6 ms against -2.1 ms); the scatter is Wi-Fi's and is unchanged. When the GPS has no fix or the second marks stop, it replies with stratum 16 and the "not synchronised" flag, so clients ignore it.
 
-Optional: wiring the GPSDO's buffered 1PPS output to IO27 (on CN1, through a 10k/20k divider for 5 V logic) lets the CYD time the edge directly. The firmware finds which edge marks the second by itself, prefers it over the Nano's report, and prints the measured PPS-to-report delay on the console every minute.
+The 1PPS comes from the GPSDO's front-panel BNC to IO27 (on CN1, through a 10k/20k divider for 5 V logic). On our unit that pulse is inverted (it falls on the second). The firmware finds which edge marks the second by itself, prefers it over the Nano's report, and reports the edge timing and the measured PPS-to-report delay at `/api/pps`; the event log notes the PPS input being found or lost.
 
 ## Build and flash
 
