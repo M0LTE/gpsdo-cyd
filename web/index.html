@@ -241,7 +241,7 @@ async function network(){
  if(!n.wifi_enabled){kv('network',[['Wi-Fi','off (not set up)']]);return}
  const q=n.rssi_dbm>=-60?'good':n.rssi_dbm>=-72?'fair':'weak';
  kv('network',[['Wi-Fi',n.ssid+(n.wifi_connected?'':' (not connected)')],['Signal',n.wifi_connected?`${n.rssi_dbm} dBm (${q}), channel ${n.channel}`:'-'],
-  ['IP address',n.ip||'-'],['Name','gpsdo.local'],['MAC',n.mac||'-'],['NTP',`${n.ntp_synced?'stratum 1 (GPS)':'not synced'}, ${n.ntp_served} served`],
+  ['IP address',n.ip||'-'],['Name',n.hostname||'-'],['MAC',n.mac||'-'],['NTP',`${n.ntp_synced?'stratum 1 (GPS)':'not synced'}, ${n.ntp_served} served`],
   ['MQTT broker',`${n.mqtt_host}:${n.mqtt_port}`+(n.mqtt_ip?` (${n.mqtt_ip})`:'')],['MQTT',n.mqtt_connected?`connected for ${dur(n.mqtt_up_s)}`:'not connected'],
   ['Published',n.last_publish_age_s!=null?`${n.published}, last ${n.last_publish_age_s}s ago, to gpsdo/state`:'-'],
   ['Last error',n.last_error?`${dur(n.last_error_age_s)} ago: ${n.last_error}`:'none'],['Display up',dur(n.uptime_s)],['Free memory',`${Math.round(n.free_heap/1024)} KB`]]);
