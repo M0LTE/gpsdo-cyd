@@ -51,13 +51,18 @@ void task(void*) {
     NtpServerState st;
     if (!unixAt(rxLocal, rxUnix, st)) continue;  // no time at all yet: stay silent
     uint32_t ip = from.sin_addr.s_addr;
+    uint8_t mode = req[0] & 7, version = (req[0] >> 3) & 7;
+    if ((mode != 3 && mode != 1) || version < 1 || version > 4) continue;  // not a request we answer
     // Random bits below the microsecond keep our receive timestamps unique between clients.
     uint64_t rxTs = ntpTimestamp(rxUnix, esp_random());
     while (interleave.holds(rxTs)) ++rxTs;
     uint64_t prevTx = 0;
-    bool xleave = interleave.take(ip, req, prevTx);
+    // Client/server interleaving only: symmetric (mode 1) interleaving has different rules.
+    bool xleave = mode == 3 && interleave.take(ip, req, prevTx);
     unixAt(esp_timer_get_time(), txUnix, st);
-    if (!buildNtpReplyTs(req, n, rxTs, xleave ? prevTx : ntpTimestamp(txUnix, esp_random()), xleave, st, out)) continue;
+    uint64_t txTs = xleave ? prevTx : ntpTimestamp(txUnix, esp_random());
+    if (!xleave && txTs <= rxTs) txTs = rxTs + 1;  // independent sub-microsecond noise must not reverse them
+    if (!buildNtpReplyTs(req, n, rxTs, txTs, xleave, st, out)) continue;
     sendto(sock, out, sizeof out, 0, (sockaddr*)&from, fl);
     // sendto returns once lwIP has handed the frame to the Wi-Fi driver: as close to the real
     // send time as we can see. A client in the interleaved mode gets this with its next reply.

@@ -33,7 +33,7 @@ bool buildNtpReplyTs(const uint8_t* req, int len, uint64_t rxTs, uint64_t txTs, 
 // last reply to it in its origin field; we then send the true send time of that reply.
 class Interleave {
 public:
-  static constexpr int kSlots = 32;
+  static constexpr int kSlots = 64;  // replies to all clients share these, about 1.5 KB
   // Origin, receive and transmit timestamps of a request (bytes 24, 32 and 40, big-endian).
   static uint64_t field(const uint8_t* req, int offset);
   // If req (from ip) asks for the interleaved mode and we still hold the reply it refers to, gives
