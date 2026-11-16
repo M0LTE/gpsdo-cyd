@@ -170,6 +170,8 @@ void Monitor::addTrend(const ReportLine& d) {
 
 void Monitor::tick(uint32_t nowMs) {
   lastNowMs_ = nowMs;
+  // Forget a PPS that has stopped, so its age cannot wrap round to "live" after 49.7 days.
+  if (havePps_ && ageMs(nowMs, (uint32_t)(lastPpsUs_ / 1000)) > 10000) havePps_ = false;
   nmea_.expire(nowMs);
   uint16_t a = 0;
   bool nanoLive = !nanoDataStale_ && nano_.msSinceData(nowMs) <= kSilentMs;

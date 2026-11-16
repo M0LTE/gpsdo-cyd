@@ -75,6 +75,8 @@ public:
   void onGpsLine(const std::string& line, uint32_t nowMs) { onGpsLine(line, nowMs, (int64_t)nowMs * 1000); }
   // A PPS edge timed directly (if the PPS is wired to the display). Preferred over the Nano's report.
   void onPpsEdge(int64_t us) { lastPpsUs_ = us; havePps_ = true; clock_.onSecondMark(us); }
+  // True while the wired PPS input is giving edges (millis() is the microsecond timer / 1000).
+  bool ppsInputLive(uint32_t nowMs) const { return havePps_ && ageMs(nowMs, (uint32_t)(lastPpsUs_ / 1000)) < 3000; }
   const UtcClock& clock() const { return clock_; }
   // Delay from the PPS edge to the first byte of the Nano's report line (measured, see README).
   // Measured 2026-11-16 against the PPS wired to IO27: 3.15 ms. (The earlier 5.8 ms came from
