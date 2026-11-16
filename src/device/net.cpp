@@ -1,7 +1,6 @@
 #include "net.h"
 
 #include <PubSubClient.h>
-#include <ESPmDNS.h>
 #include <WiFi.h>
 
 #include "config.h"
@@ -21,7 +20,6 @@ bool txPowerSet = false;
 std::string lastKey;
 std::string deviceId;
 constexpr const char* kHostname = "gpsdo";
-bool mdnsStarted = false;
 std::string lastError, brokerIp;
 uint32_t lastErrorMs = 0;
 uint32_t publishes = 0, connectedAtMs = 0;
@@ -48,7 +46,8 @@ void Net::begin(const Settings& s) {
     return;
   }
   WiFi.persistent(false);
-  // Name given to the DHCP server (some routers then serve it in DNS); mDNS adds gpsdo.local.
+  // Name given to the DHCP server (most routers then serve it in DNS). No mDNS: the IDF 4.4 mDNS
+  // responder crashed the display on a null pointer while parsing a LAN packet (16 Nov 2026).
   WiFi.setHostname(kHostname);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -85,12 +84,6 @@ void Net::loop(Monitor& m, uint32_t nowMs) {
     txPowerSet = true;
     Serial.printf("# Wi-Fi: joined %s as %s, signal %d dBm\n", cfg.wifiSsid.c_str(), WiFi.localIP().toString().c_str(),
                   WiFi.RSSI());
-    if (!mdnsStarted && MDNS.begin(kHostname)) {
-      mdnsStarted = true;
-      MDNS.addService("http", "tcp", 80);
-      MDNS.addService("ntp", "udp", 123);
-      Serial.printf("# mDNS: %s.local\n", kHostname);
-    }
     char e[48];
     snprintf(e, sizeof e, "Wi-Fi joined, %d dBm, ch %d", (int)WiFi.RSSI(), (int)WiFi.channel());
     m.logEvent(nowMs, 0, e);
