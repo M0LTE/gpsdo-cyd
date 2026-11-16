@@ -215,6 +215,38 @@ void test_no_false_gps_lost_at_start() {
   TEST_ASSERT_TRUE(m.referenceOk());
 }
 
+// One second of GPS: a PPS edge, then an RMC (with date) for unix-style second index sec.
+static void gpsSecond(Monitor& m, int64_t edgeUs, int sec) {
+  int hh = 13 + sec / 3600, mm = (sec / 60) % 60, ss = sec % 60;
+  char body[120], line[140];
+  std::snprintf(body, sizeof body, "GNRMC,%02d%02d%02d.00,A,5200.00000,N,00100.00000,W,0.01,,081126,,,A,V", hh, mm, ss);
+  unsigned cs = 0;
+  for (const char* c = body; *c; ++c) cs ^= (unsigned char)*c;
+  std::snprintf(line, sizeof line, "$%s*%02X", body, cs);
+  m.onPpsEdge(edgeUs);
+  uint32_t ms = (uint32_t)((edgeUs + 100000) / 1000);
+  m.onGpsLine(line, ms, edgeUs + 100000);
+  m.onGpsLine(kGga, ms, edgeUs + 100000);
+  m.onGpsLine(kGsa, ms, edgeUs + 100000);
+  m.tick(ms);
+}
+
+void test_gps_time_step_ignored_while_gps_starts() {
+  // A u-blox that has just started can step its UTC by a second when it learns the leap seconds.
+  Monitor m;
+  int sec = 0;
+  int64_t us = 1000000;
+  for (int i = 0; i < 60; ++i, ++sec, us += 1000000) gpsSecond(m, us, sec);
+  ++sec;  // GPS time steps one second, a minute after start
+  for (int i = 0; i < 60; ++i, ++sec, us += 1000000) gpsSecond(m, us, sec);
+  TEST_ASSERT_FALSE(m.alarms() & kAlarmGpsSpoof);
+  // Settled: the same step 20 minutes in is a spoofing sign.
+  for (int i = 0; i < 20 * 60; ++i, ++sec, us += 1000000) gpsSecond(m, us, sec);
+  ++sec;
+  for (int i = 0; i < 5; ++i, ++sec, us += 1000000) gpsSecond(m, us, sec);
+  TEST_ASSERT_TRUE(m.alarms() & kAlarmGpsSpoof);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_line_assembler);
@@ -230,5 +262,6 @@ int main() {
   RUN_TEST(test_no_false_gps_lost_at_start);
   RUN_TEST(test_long_silence_never_turns_green);
   RUN_TEST(test_spliced_lines_cannot_fake_lock);
+  RUN_TEST(test_gps_time_step_ignored_while_gps_starts);
   return UNITY_END();
 }
